@@ -45,6 +45,24 @@ export const SAND_TUNING = {
   grainSleepQuadrant: true,
   grainSleepDelaySeconds: 1,
 
+  // --- belt (bang chuyen) — nguon ir/tuning.json configs.5.data, KHONG nhan geomScale ---
+  // velocity giu WORLD suot vong integrate (integrate.ts dong 118) va tangent da doi sang world roi normalize,
+  // nen beltSpeed la world/s; ca canh song dung he toa do Unity -> so IR truyen thang.
+  // Bo *BoostRate KHONG port: chung thuoc booster, manifest P2 da DROP toan bo SandFlow/Booster/.
+  grainBeltSpeed: 13,
+  grainBeltCoupling: 40,
+  grainBeltOneWay: true,
+  grainBeltRadialDamping: 1,
+  grainBeltTopRelease: 0.800000011920929,
+  grainBeltTopReleaseStart: 1,
+  grainBeltTopTangentDamp: 80,
+  grainBeltUpSpeed: 20,
+  grainBeltUpCoupling: 40,
+  grainBeltUpRadialDamping: 8,
+  grainBeltUpTopRelease: 1,
+  grainBeltUpTopReleaseStart: 0,
+  grainBeltUpTopTangentDamp: 0,
+
   // --- ccd + neighbor grid ---
   grainGrainCcdGate: 2,
   grainGrainCcdMaxPull: 1,

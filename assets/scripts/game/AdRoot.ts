@@ -15,7 +15,7 @@
 // Renderer đồng bộ 1 lần/FRAME (không phải mỗi step): 2 step trong 1 frame ghi mesh 2 lần cho cùng 1 hình.
 
 import {
-  Asset, Camera, Color, Component, EventTouch, Input, Material, Node, TextAsset, Vec3,
+  Asset, Camera, Color, Component, EventTouch, Input, Material, Node, TextAsset, Texture2D, Vec3,
   input, resources, view, _decorator,
 } from 'cc';
 
@@ -99,6 +99,8 @@ export class AdRoot extends Component {
   private runner: ScenarioRunner | null = null;
   private jarColumns: JarColumns | null = null;
   private gameCamera: Camera | null = null;
+  /** Art nut CTA (assets/resources/ui/cta-button.png). null = chua co art -> ve placeholder mau. */
+  private ctaTex: Texture2D | null = null;
 
   private solverParams!: SolverParams;
   private occ!: GrainOccupancyField;
@@ -127,12 +129,15 @@ export class AdRoot extends Component {
 
   /** Nạp asset (bất đồng bộ) rồi dựng. Cờ `ready` gác `update()` để không chạy sim khi chưa có gì. */
   private async boot(): Promise<void> {
-    const [levelTxt, scenarioTxt, grainMat, pictureMat] = await Promise.all([
+    const [levelTxt, scenarioTxt, grainMat, pictureMat, ctaTex] = await Promise.all([
       loadRes(this.levelResPath, TextAsset),
       loadRes(this.scenarioResPath, TextAsset),
       loadRes('mat/grain', Material),
       loadRes('mat/picture', Material),
+      // Art CTA la TUY CHON: thieu -> null -> quad mau nhu cu. Khong duoc chan boot vi mot cai nut.
+      loadResOpt('ui/cta-button/texture', Texture2D),
     ]);
+    this.ctaTex = ctaTex;
 
     this.level = loadLevel(levelTxt.text);
 
@@ -336,11 +341,16 @@ export class AdRoot extends Component {
     const size = view.getVisibleSize();
     const aspect = size.height > 0 ? size.width / size.height : 9 / 16;
     const w = widthPct * 2 * halfH * aspect;
-    const h = w * 0.24;
+    // Ti le nut lay THEO ART that (862x405 = 2.128) chu khong phai hang so 0.24 cua placeholder — dung 0.24 voi
+    // art vien thuoc nay se bop det vien bo tron. Chua co art -> giu 0.24 nhu cu.
+    const artRatio = this.ctaTex !== null && this.ctaTex.height > 0 ? this.ctaTex.width / this.ctaTex.height : 0;
+    const h = artRatio > 0 ? w / artRatio : w * 0.24;
 
     const node = new Node('CtaButton');
     node.setParent(this.node);
-    attachQuad(node, w, h, new Color(255, 176, 32, 255));
+    // Co art -> tint TRANG (khong nhan mau len art). Khong co art -> quad cam nhu cu.
+    const tint = this.ctaTex !== null ? new Color(255, 255, 255, 255) : new Color(255, 176, 32, 255);
+    attachQuad(node, w, h, tint, this.ctaTex);
     const pos = this.screenRatioToWorld(0.5, marginPct, Z_CTA);
     node.setWorldPosition(pos.x, pos.y + h * 0.5, Z_CTA);
     node.active = false;
@@ -383,15 +393,31 @@ export class AdRoot extends Component {
         hasSdf: 1, sdf, segments,
         restitution: SAND_TUNING.grainWallRestitution,
         frictionKeep,
-        // Belt = băng chuyền. ConveyorController bên nguồn là shell no-op (manifest P2 đã chốt chuyển sang
-        // bake data-only) -> mọi knob belt để 0 = TẮT, không phải chưa điền.
-        beltSpeed: 0, beltCoupling: 0, beltRadialDamping: 0,
-        beltTopRelease: 0, beltTopReleaseStart: 0, beltTopTangentDamp: 0,
-        beltSpeedUp: 0, beltCouplingUp: 0, beltRadialDampingUp: 0,
-        beltTopReleaseUp: 0, beltTopReleaseStartUp: 0, beltTopTangentDampUp: 0,
-        enforceOneWay: 0,
-        // Cửa trượt chỉ đóng khi belt ĐẦY, mà belt không chạy -> không có nguồn điều khiển. Xem SdfBuild.ts.
-        hasDoor: 0, door: empty, gapBeltTopY: 0,
+        // Belt = băng chuyền, CHẠY THẬT. ⚠ SỬA 2026-08-24: bản trước để cả 12 knob = 0 vì manifest P2 đọc
+        // `ConveyorController` là shell no-op rồi suy ra belt tắt. Sai: lực belt KHÔNG nằm ở controller đó mà ở
+        // `GrainFlowBackend`, ăn thẳng 13 con số dưới đây — chúng nằm sẵn trong ir/tuning.json configs.5.data.
+        // Hệ quả của bug cũ: không có gì tải hạt đi -> hạt đọng ở đáy, băng chuyền đứng im (user báo mục 4 + 6).
+        beltSpeed: SAND_TUNING.grainBeltSpeed,
+        beltCoupling: SAND_TUNING.grainBeltCoupling,
+        beltRadialDamping: SAND_TUNING.grainBeltRadialDamping,
+        beltTopRelease: SAND_TUNING.grainBeltTopRelease,
+        beltTopReleaseStart: SAND_TUNING.grainBeltTopReleaseStart,
+        beltTopTangentDamp: SAND_TUNING.grainBeltTopTangentDamp,
+        beltSpeedUp: SAND_TUNING.grainBeltUpSpeed,
+        beltCouplingUp: SAND_TUNING.grainBeltUpCoupling,
+        beltRadialDampingUp: SAND_TUNING.grainBeltUpRadialDamping,
+        beltTopReleaseUp: SAND_TUNING.grainBeltUpTopRelease,
+        beltTopReleaseStartUp: SAND_TUNING.grainBeltUpTopReleaseStart,
+        beltTopTangentDampUp: SAND_TUNING.grainBeltUpTopTangentDamp,
+        enforceOneWay: SAND_TUNING.grainBeltOneWay ? 1 : 0,
+        // Cửa trượt vẫn TẮT: nó đóng theo tỉ lệ belt-full (conveyorCapacityMode=AutoFillRatio, grainBeltFullEntry
+        // /Exit/Timeout) mà mình chưa port bộ đếm đó. Xem SdfBuild.ts — doorThr đã tính sẵn để bật lại.
+        //
+        // ⚠ SỬA 2026-08-24 (bug thứ 2, cùng ổ với belt): gapBeltTopY = 0 là TRẦN VORTEX khi cửa ĐÓNG. Cửa đang
+        // tắt mà vẫn để 0 nghĩa là vĩnh viễn áp hành vi "cửa đóng" cho vùng |x| <= wallX — ĐÚNG dấu chân miệng
+        // phễu. integrate.ts dòng 172: beltTopHere = |lp.x|<=wallX ? gapBeltTopY : sdf.beltTopY -> hạt ngay dưới
+        // phễu không nhận vortex -> kẹt tại chỗ. Cửa mở thì trần phải là beltTopY nguyên vẹn.
+        hasDoor: 0, door: empty, gapBeltTopY: this.rig.sdf.beltTopY,
         hasOcc: 1, occ: this.occ,
         occSnapshot: this.occDilated, occSnapshotRaw: this.occRaw, occNormals: this.occNormals,
         occSlip: SAND_TUNING.grainOccupancySlip,
@@ -441,9 +467,13 @@ export class AdRoot extends Component {
         occSnapshot: this.occDilated, occSnapshotRaw: this.occRaw, occNormals: this.occNormals,
         occSlip: SAND_TUNING.grainOccupancySlip,
         hasSdf: 1, sdf, gapBeltTopY: 0,
-        sleepEnabled: SAND_TUNING.grainSleepEnabled ? 1 : 0,
-        quadrantSleep: SAND_TUNING.grainSleepQuadrant ? 1 : 0,
-        sleepDelaySteps: Math.max(1, Math.round(SAND_TUNING.grainSleepDelaySeconds / SIM_DT)),
+        // SLEEP TẮT CỨNG (user chốt 2026-08-24: bên Unity sleep chỉ để test, luôn tắt — ir/tuning.json cũng ghi
+        // grainSleepEnabled = false). Không đọc SAND_TUNING nữa để không ai bật nhầm qua tuning.
+        // Toán tiếp xúc không đổi: mọi chỗ rẽ nhánh theo asleep (share 1 vs ½) rơi hết về nhánh "thức".
+        // Code sleep trong solver/ giờ là CODE CHẾT — xoá được, chưa xoá vì đó là diff riêng cần review riêng.
+        sleepEnabled: 0,
+        quadrantSleep: 0,
+        sleepDelaySteps: 1,
         uniformRadius: SAND_TUNING.grainParticleRadius,
       },
     };
@@ -570,6 +600,17 @@ export class AdRoot extends Component {
     this.host.model.copyFineOccupancyTo(this.occRaw);
     refreshOccupancy(this.occ, this.occRaw, this.occDilated, this.occNormals);
   }
+}
+
+/**
+ * Bản KHOAN DUNG của loadRes cho asset TUY CHON: thiếu -> null + 1 dòng warn, KHÔNG reject.
+ * Dùng cho art CTA: chưa có art thì ad vẫn phải chạy được, chỉ là nút hiện dạng placeholder.
+ */
+function loadResOpt<T extends Asset>(path: string, type: new () => T): Promise<T | null> {
+  return loadRes(path, type).catch(() => {
+    console.warn(`[AdRoot] không nạp được asset tuỳ chọn "${path}" — dùng placeholder.`);
+    return null;
+  });
 }
 
 /**
