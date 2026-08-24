@@ -185,6 +185,8 @@ export class AdRoot extends Component {
   private boxPrefab: Prefab | null = null;
   /** hex HOA 6 ký tự -> atlas màu của hộp. Thiếu màu nào thì hộp màu đó chỉ có mesh trắng. */
   private readonly boxTex: Record<string, Texture2D> = {};
+  /** Đường dẫn resources đã nạp được prefab hộp (hoặc lý do thiếu) — in ra log boot. */
+  private boxPrefabPath = '(chua nap)';
   /** Số lớp art nền dựng được (BoardVisual). Ít hơn số lớp trong layout = có PNG chưa nạp được. */
   private boardLayers = 0;
   /** Layout chỉnh tay được; mặc định = số suy từ prefab Unity. */
@@ -338,7 +340,7 @@ export class AdRoot extends Component {
       `[boot] mode=${this.solverMode.toUpperCase()} lo=${this.level.jars.length} `
       + `poolCap=${this.solver.pool.capacity} rigStandIn=${this.showRigStandIn}`,
       `[boot] art: boxPrefab=${this.boxPrefab !== null ? 'OK' : 'THIEU'} `
-      + `boxTex=[${texKeys.join(',')}] ctaTex=${this.ctaTex !== null ? 'OK' : 'THIEU'} `
+      + `boxTex=[${texKeys.join(',')}] boxPath=${this.boxPrefabPath} ctaTex=${this.ctaTex !== null ? 'OK' : 'THIEU'} `
       + `board=${this.boardLayers}/${this.layout.board.length} layout=${this.layoutSource}`,
     ];
     for (const l of lines) console.log(l);
@@ -433,8 +435,19 @@ export class AdRoot extends Component {
       const name = boxTextureName(rgb);
       if (hexes.indexOf(name) < 0) hexes.push(name);
     }
+    // FBX là asset GHÉP: prefab nằm TRONG nó dưới tên sub-asset "SKM_Box.prefab" (xem subMetas của .fbx.meta),
+    // nên đường dẫn resources là "<file>/<tên sub-asset>" — y hệt kiểu "box/FF9900/texture" của ảnh. Thử lần
+    // lượt rồi GHI LẠI cái nào ăn: đoán 1 phát rồi im lặng trả null chính là cái đã ra boxPrefab=THIEU.
+    const candidates = ['box/SKM_Box/SKM_Box', 'box/SKM_Box'];
     const [prefab, texes] = await Promise.all([
-      loadResOpt('box/SKM_Box', Prefab),
+      (async (): Promise<Prefab | null> => {
+        for (const p of candidates) {
+          const a = await loadResOpt(p, Prefab);
+          if (a !== null) { this.boxPrefabPath = p; return a; }
+        }
+        this.boxPrefabPath = `THIEU (da thu: ${candidates.join(' , ')})`;
+        return null;
+      })(),
       Promise.all(hexes.map((h) => loadResOpt(`box/${h}/texture`, Texture2D))),
     ]);
     this.boxPrefab = prefab;
