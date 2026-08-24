@@ -44,6 +44,7 @@ import { HandHint } from './HandHint';
 import { attachQuad } from './QuadVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
+import { probeStatic } from './StaticProbe';
 import { ScenarioRunner, type ScenarioJson } from './ScenarioRunner';
 import type { NetworkId } from './NetworkAdapter';
 
@@ -141,6 +142,17 @@ export class AdRoot extends Component {
   @property({ tooltip: 'Vẽ hình khối stand-in của rig từ SDF (khung/phễu/vành). Tắt khi đã có art PNG thật.' })
   showRigStandIn = true;
 
+  /**
+   * Probe CHẨN ĐOÁN hạt đứng im (game/StaticProbe.ts) — in ra console mỗi `staticProbePeriod` giây, phân loại
+   * hạt tĩnh theo THỨ ĐANG GIỮ NÓ (rig / occupancy tranh / ghost / lơ lửng thật). Chỉ đọc, không sửa gì.
+   * TẮT trước build P5 như debugHud.
+   */
+  @property({ tooltip: 'In log phân loại hạt đứng im ra console (chẩn đoán). TẮT trước build P5.' })
+  staticProbe = true;
+
+  @property({ tooltip: 'Chu kỳ in log probe (giây)' })
+  staticProbePeriod = 2;
+
   // --- state ---
   private level!: LoadedLevel;
   private map!: PictureMap;
@@ -184,6 +196,7 @@ export class AdRoot extends Component {
   private killedTotal = 0;
   private hudLabel: Label | null = null;
   private hudTimer = 0;
+  private probeTimer = 0;
 
   // ---- belt-full gate + cửa trượt SDF (xem §BELT-FULL bên dưới) ----
   private beltGate: BeltFullGate | null = null;
@@ -664,6 +677,17 @@ export class AdRoot extends Component {
     this.jarFly?.tick(dt);
     if (this.renderer !== null) this.renderer.syncFromPool(this.solver.pool);
     if (this.debugHud) this.tickHud(dt);
+    if (this.staticProbe) this.tickStaticProbe(dt);
+  }
+
+  /** In bảng phân loại hạt tĩnh ra console theo chu kỳ. Xem đầu game/StaticProbe.ts để biết cách đọc. */
+  private tickStaticProbe(dt: number): void {
+    this.probeTimer += dt;
+    const period = Math.max(0.25, this.staticProbePeriod);
+    if (this.probeTimer < period) return;
+    this.probeTimer = 0;
+    const lines = probeStatic(this.solver.pool, this.solverParams.integrate);
+    for (const l of lines) console.log(l);
   }
 
   // ==================================================================== BELT-FULL: cửa trượt + boost
