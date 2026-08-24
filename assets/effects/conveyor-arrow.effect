@@ -1,0 +1,89 @@
+// Converted 2026-08-24 (P4a-A) from Unity ShaderGraph JSON:
+// ir/shaders/__Game_SDK_Sand_Drop_Visualize_Shaders_Conveyor_Arrow.shadergraph
+// (Shader Graphs/Conveyor Arrow, UniversalUnlitSubTarget, Opaque-authored surface but graph
+// drives Alpha too so ported here as alpha-blended).
+// Reconstructed node walk (see p4a-A-shadergraph-subreport.md):
+//   tiling  = vec2(NumberArrow, 1.0)
+//   offset  = vec2(Speed * cc_time.x, 0.0)
+//   tiledUV = uv0 * tiling + offset
+//   fracUV  = fract(tiledUV)
+//   uv2     = (fracUV - Gap * 0.5) / (1.0 - Gap)      // "TilingAndOffset -> Fraction -> remap by Gap"
+//   tex     = texture(mainTexture, uv2)
+//   BaseColor = tex.rgb ; Alpha = tex.a * Opacity
+// Defaults taken from material Assets/!_Game_SDK/Sand Drop Visualize/Materials/SG_Conveyor Arrow.mat
+// (ir/materials.json): Speed=0.1, NumberArrow=5, Opacity=1, Gap=3.05.
+// NOT compile-verified — Cocos editor was kept closed per task constraints.
+CCEffect %{
+techniques:
+- name: transparent
+  passes:
+  - vert: conveyor-arrow-vs:vert
+    frag: conveyor-arrow-fs:frag
+    depthStencilState:
+      depthTest: true
+      depthWrite: false
+    rasterizerState:
+      cullMode: none
+    blendState:
+      targets:
+      - blend: true
+        blendSrc: src_alpha
+        blendDst: one_minus_src_alpha
+        blendDstAlpha: one_minus_src_alpha
+    properties:
+      mainTexture: { value: white }
+      speed:       { value: 0.1 }
+      numberArrow: { value: 5.0 }
+      opacity:     { value: 1.0, editor: { range: [0, 1] } }
+      gap:         { value: 3.05 }
+}%
+
+CCProgram conveyor-arrow-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;
+
+  out vec2 v_uv;
+
+  vec4 vert () {
+    vec4 pos = cc_matWorld * vec4(a_position, 1.0);
+    pos = cc_matViewProj * pos;
+    v_uv = a_texCoord;
+    return pos;
+  }
+}%
+
+CCProgram conveyor-arrow-fs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+
+  in vec2 v_uv;
+
+  uniform sampler2D mainTexture;
+
+  uniform Constants {
+    float speed;
+    float numberArrow;
+    float opacity;
+    float gap;
+  };
+
+  vec4 frag () {
+    // ShaderGraph "Tiling And Offset" node: Out = UV * Tiling + Offset.
+    vec2 tiling = vec2(numberArrow, 1.0);
+    vec2 offset = vec2(speed * cc_time.x, 0.0);
+    vec2 tiledUV = v_uv * tiling + offset;
+
+    // ShaderGraph "Fraction" node (frac), then remap by Gap: (frac - gap*0.5) / (1 - gap).
+    // APPROX/NOTE: material default Gap=3.05 (>1) makes the divisor negative on purpose in the
+    // original graph — ported literally (no clamp) to preserve authored behavior exactly.
+    vec2 fracUV = fract(tiledUV);
+    vec2 uv2 = (fracUV - gap * 0.5) / (1.0 - gap);
+
+    vec4 tex = texture(mainTexture, uv2);
+    return vec4(tex.rgb, tex.a * opacity);
+  }
+}%

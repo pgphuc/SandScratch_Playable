@@ -1,0 +1,81 @@
+// Converted 2026-08-24 from Unity ir/shaders/__Game_SDK_Sand_Drop_Visualize_Blending_Sprite_BlendingSprite.shader
+// (Custom/BlendingSprite) — P4a nhánh A, ad sand-drop-jar-fill.
+// Blend 2 lớp noise (shadow/highlight) lên MainTex bằng LinearBurn + Screen — tương đương Shader Graph
+// Blend node parity: Out = lerp(Base, blend(Base, Blend), Opacity).
+// Default value lay tu material Assets/!_Game_SDK/Sand Drop Visualize/Blending Sprite/Custom_BlendingSprite.mat.
+// Note ten file: ShaderGraph "Blending Sprite.shadergraph" (item 8 giỏ recode) được convert riêng
+// (blending-sprite-graph.effect) — file này chỉ là bản HLSL viết tay (item 6 giỏ 1:1), không trùng.
+CCEffect %{
+techniques:
+- name: opaque
+  passes:
+  - vert: blendingsprite-vs:vert
+    frag: blendingsprite-fs:frag
+    depthStencilState:
+      depthTest: true
+      depthWrite: false
+    rasterizerState:
+      cullMode: none
+    blendState:
+      targets:
+      - blend: false
+    properties:
+      mainTexture:      { value: white }
+      noiseShadowTex:   { value: black }
+      noiseHighlightTex: { value: black }
+      shadowOpacity:    { value: 1.0,  editor: { tooltip: "Shadow Opacity (LinearBurn)", range: [0, 1] } }
+      highlightOpacity: { value: 0.15, editor: { tooltip: "Highlight Opacity (Screen)", range: [0, 1] } }
+}%
+
+CCProgram blendingsprite-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;
+
+  out vec2 v_uv;
+
+  vec4 vert () {
+    vec4 pos = cc_matWorld * vec4(a_position, 1.0);
+    pos = cc_matViewProj * pos;
+    v_uv = a_texCoord;
+    return pos;
+  }
+}%
+
+CCProgram blendingsprite-fs %{
+  precision highp float;
+
+  in vec2 v_uv;
+
+  uniform sampler2D mainTexture;
+  uniform sampler2D noiseShadowTex;
+  uniform sampler2D noiseHighlightTex;
+
+  uniform Constants {
+    float shadowOpacity;
+    float highlightOpacity;
+  };
+
+  // LinearBurn: Base + Blend - 1
+  vec3 BlendLinearBurn(vec3 base, vec3 blend, float opacity) {
+    return mix(base, base + blend - 1.0, opacity);
+  }
+  // Screen: 1 - (1 - Base) * (1 - Blend)
+  vec3 BlendScreen(vec3 base, vec3 blend, float opacity) {
+    return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
+  }
+
+  vec4 frag () {
+    vec4 baseCol        = texture(mainTexture, v_uv);
+    vec3 shadowNoise    = texture(noiseShadowTex, v_uv).rgb;
+    vec3 highlightNoise = texture(noiseHighlightTex, v_uv).rgb;
+
+    vec3 col = BlendLinearBurn(baseCol.rgb, shadowNoise, shadowOpacity);
+    col = BlendScreen(col, highlightNoise, highlightOpacity);
+
+    return vec4(col, baseCol.a);
+  }
+}%

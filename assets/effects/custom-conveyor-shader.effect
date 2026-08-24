@@ -1,0 +1,66 @@
+// Converted 2026-08-24 from Unity ir/shaders/__Game_SDK_SandGameExtraction_conveyor_Shader_Custom_ConveyorShader.shader
+// (Custom/ConveyorShader) — P4a nhánh A, ad sand-drop-jar-fill.
+//
+// NGHI NGO / CANH BAO: file nguồn có comment "//DummyShaderTextExporter" — đây là bản shader đã bị Unity
+// EXPORT/REFLECT LẠI (dump từ compiled shader, không phải source gốc còn giữ logic đầy đủ). Properties khai
+// báo _ColorActiveZone, _PatternColor, _PatternTex, _Speed, _ActiveZoneLength, _StencilComp/_Stencil/_StencilOp
+// NHƯNG fragment/vertex stage KHÔNG hề đọc các biến này — chỉ có _MainTex.Sample(...) * _Color. Rất có thể
+// bản export đã mất phần logic animate pattern/active-zone theo _Speed (tên "Conveyor" gợi ý băng chuyền
+// chạy hoạt hình, nhưng code export không animate gì cả). Effect này CHỈ dịch đúng những gì source thực có
+// (MainTex tint by Color) — KHÔNG bịa thêm logic pattern/speed. Nếu behavior thực tế cần pattern cuộn +
+// active-zone mask, phải tìm lại source .shader gốc bên Unity project (ngoài phạm vi IR) hoặc hỏi user.
+// KHÔNG TÌM THẤY material instance nào dùng shader này trong ir/materials.json -> default lấy từ Properties
+// block ShaderLab (giá trị _ColorActiveZone/_PatternColor/_Speed/_ActiveZoneLength/stencil giữ nguyên khai
+// báo nhưng KHÔNG đưa vào effect vì không có tác dụng gì trong logic thực -> tránh gây hiểu lầm là đã convert).
+CCEffect %{
+techniques:
+- name: opaque
+  passes:
+  - vert: conveyor-vs:vert
+    frag: conveyor-fs:frag
+    depthStencilState:
+      depthTest: true
+      depthWrite: true
+    rasterizerState:
+      cullMode: back
+    blendState:
+      targets:
+      - blend: false
+    properties:
+      mainTexture: { value: white }
+      color:       { value: [1, 1, 1, 1], editor: { type: color, tooltip: "_Color (BaseColor)" } }
+}%
+
+CCProgram conveyor-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;
+
+  out vec2 v_uv;
+
+  vec4 vert () {
+    vec4 pos = cc_matWorld * vec4(a_position, 1.0);
+    pos = cc_matViewProj * pos;
+    v_uv = a_texCoord;
+    return pos;
+  }
+}%
+
+CCProgram conveyor-fs %{
+  precision highp float;
+
+  in vec2 v_uv;
+
+  uniform sampler2D mainTexture;
+
+  uniform Constants {
+    vec4 color;
+  };
+
+  vec4 frag () {
+    return texture(mainTexture, v_uv) * color;
+  }
+}%

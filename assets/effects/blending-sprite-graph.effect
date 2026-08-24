@@ -1,0 +1,90 @@
+// Converted 2026-08-24 (P4a-A) from Unity ShaderGraph JSON:
+// ir/shaders/__Game_SDK_Sand_Drop_Visualize_Blending_Sprite_Blending_Sprite.shadergraph
+// (Shader Graphs/Blending Sprite, UniversalSpriteUnlitSubTarget).
+// Reconstructed from m_Nodes/m_Edges (see p4a-A-shadergraph-subreport.md for the node walk):
+//   BaseColor = Blend_Screen( Blend_LinearBurn(MainTex, NoiseShadow_Tex, Shadow_Opacity),
+//                             NoiseHighlight_Tex, Highlight_Opacity )
+//   Alpha = 1.0 constant (SurfaceDescription.Alpha block has NO incoming edge in the graph —
+//           it is left at its literal default, texture alpha is never read for alpha output).
+// NOTE: the graph also contains an orphaned branch (Strength property -> Vector4(1,1,1,1) subtract
+// -> multiply -> add) that never reaches any Block node — dead code in the source graph, correctly
+// dropped here (matches Unity: _Strength material prop has zero visual effect upstream too).
+// Defaults taken from material Assets/!_Game_SDK/Sand Drop Visualize/Blending Sprite/Shader Graphs_Blending Sprite.mat
+// (ir/materials.json): Shadow_Opacity=1, Highlight_Opacity=0.172.
+// NOT compile-verified — Cocos editor was kept closed per task constraints.
+CCEffect %{
+techniques:
+- name: opaque
+  passes:
+  - vert: blending-sprite-graph-vs:vert
+    frag: blending-sprite-graph-fs:frag
+    depthStencilState:
+      depthTest: true
+      depthWrite: false
+    rasterizerState:
+      cullMode: none
+    blendState:
+      targets:
+      - blend: false
+    properties:
+      mainTexture:      { value: white }
+      noiseShadowTex:   { value: black }
+      noiseHighlightTex: { value: black }
+      shadowOpacity:    { value: 1.0,   editor: { tooltip: "Shadow_Opacity (LinearBurn mix factor)", range: [0, 1] } }
+      highlightOpacity: { value: 0.172, editor: { tooltip: "Highlight_Opacity (Screen mix factor)", range: [0, 1] } }
+}%
+
+CCProgram blending-sprite-graph-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;
+
+  out vec2 v_uv;
+
+  vec4 vert () {
+    vec4 pos = cc_matWorld * vec4(a_position, 1.0);
+    pos = cc_matViewProj * pos;
+    v_uv = a_texCoord;
+    return pos;
+  }
+}%
+
+CCProgram blending-sprite-graph-fs %{
+  precision highp float;
+
+  in vec2 v_uv;
+
+  uniform sampler2D mainTexture;
+  uniform sampler2D noiseShadowTex;
+  uniform sampler2D noiseHighlightTex;
+
+  uniform Constants {
+    float shadowOpacity;
+    float highlightOpacity;
+  };
+
+  // ShaderGraph Blend node, mode index 9 = LinearBurn: Base + Blend - 1, mixed by Opacity slot.
+  vec3 BlendLinearBurn(vec3 base, vec3 blend, float opacity) {
+    return mix(base, base + blend - 1.0, opacity);
+  }
+  // ShaderGraph Blend node, mode index 17 = Screen: 1 - (1 - Base) * (1 - Blend), mixed by Opacity.
+  vec3 BlendScreen(vec3 base, vec3 blend, float opacity) {
+    return mix(base, 1.0 - (1.0 - base) * (1.0 - blend), opacity);
+  }
+
+  vec4 frag () {
+    vec3 mainCol         = texture(mainTexture, v_uv).rgb;
+    vec3 shadowNoise     = texture(noiseShadowTex, v_uv).rgb;
+    vec3 highlightNoise  = texture(noiseHighlightTex, v_uv).rgb;
+
+    vec3 col = BlendLinearBurn(mainCol, shadowNoise, shadowOpacity);
+    col = BlendScreen(col, highlightNoise, highlightOpacity);
+
+    // APPROX: source graph's SurfaceDescription.Alpha block is unconnected (literal 1.0) —
+    // ported as opaque alpha=1, not MainTex.a, to match the actual node graph exactly.
+    return vec4(col, 1.0);
+  }
+}%

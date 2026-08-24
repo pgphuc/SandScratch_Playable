@@ -1,0 +1,121 @@
+// Converted 2026-08-24 from Unity ir/shaders/__Game_SDK_SandFlow_Material_GrainInstanced3DFlat.shader
+// (SandFlow/GrainInstanced3DFlat) — P4a nhánh A, ad sand-drop-jar-fill.
+// Biến thể mờ/màu tươi của grain-instanced-3d: bỏ specular/glint/rim, thêm per-grain size jitter.
+// KHONG TIM THAY material instance nao dung shader nay trong ir/materials.json -> default value lay tu
+// Properties block ShaderLab goc (KHONG bia).
+//
+// KHONG DUNG GPU INSTANCING (giong grain-instanced-3d.effect): mau per-hat qua a_color, seed jitter qua
+// a_position (tam hat, hang so 4 dinh/hat) + a_texCoord1.x (radius), do SandGrainRenderer.ts bake.
+CCEffect %{
+techniques:
+- name: opaque
+  passes:
+  - vert: grain3dflat-vs:vert
+    frag: grain3dflat-fs:frag
+    depthStencilState:
+      depthTest: true
+      depthWrite: true
+    rasterizerState:
+      cullMode: none
+    blendState:
+      targets:
+      - blend: false
+    properties:
+      grainScale:   { value: 1.0,  editor: { tooltip: "Grain Size (visual, doc lap radiusScale)", range: [0.1, 2] } }
+      sizeJitter:   { value: 0.2,  editor: { tooltip: "Per-grain Size Jitter", range: [0, 0.6] } }
+      lightDir:     { value: [-0.5, 0.7, 0.6, 0], editor: { tooltip: "Light Dir (screen-space)" } }
+      ambient:      { value: 0.7,  editor: { tooltip: "Ambient (cao = mau tuoi)", range: [0, 1] } }
+      shadeStrength: { value: 0.35, editor: { tooltip: "Shade Strength (do dam khoi tron)", range: [0, 1] } }
+      brightJitter: { value: 0.12, editor: { tooltip: "Per-grain Brightness Jitter", range: [0, 0.5] } }
+      grainTilt:    { value: 0.12, editor: { tooltip: "Per-grain Normal Tilt", range: [0, 0.4] } }
+}%
+
+CCProgram grain3dflat-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;   // corner ±1
+  in vec4 a_color;      // mau per-hat (thay UNITY_INSTANCING _Color)
+ // MESH GOP (P4b 2026-08-24): a_position = TAM hat (world), HANG SO 4 dinh -> dong thoi la seed Hash13 (dung vai
+  // tro cot dich chuyen cua UNITY_MATRIX_M ben Unity). Goc quad dung lai trong VS. a_texCoord1.x = radius (world),
+  // nen grainScale + sizeJitter van la knob material LIVE, khong phai rebuild mesh.
+  in vec2 a_texCoord1;  // x = radius (world), yz = du tru
+
+  out vec2 v_uv;
+  out vec4 v_color;
+  out vec4 v_grain; // xy = tilt normal, z = brightness mul
+
+  uniform Constants {
+    vec4 lightDir;
+    float grainScale;
+    float sizeJitter;
+    float ambient;
+    float shadeStrength;
+    float brightJitter;
+    float grainTilt;
+  };
+
+  float Hash13(vec3 p3) {
+    p3 = fract(p3 * 0.1031);
+    p3 += dot(p3, p3.zyx + 31.32);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+
+  vec4 vert () {
+    vec3 center = a_position;                       // tam hat, hang so 4 dinh
+    vec3 seed = center;                             // = world-pos tam (nhu UNITY_MATRIX_M._m03_m13_m23)
+    float h1 = Hash13(seed);
+    float h2 = Hash13(seed + 17.0);
+    float h3 = Hash13(seed + 43.0);
+
+    float sizeMul = 1.0 + (h2 * 2.0 - 1.0) * sizeJitter;
+    float radius = a_texCoord1.x * grainScale * sizeMul;   // scale RIENG hat, KHONG scale bai cat
+    vec3 posOS = center + vec3(a_texCoord * radius, 0.0);
+    vec4 pos = cc_matWorld * vec4(posOS, 1.0);
+    pos = cc_matViewProj * pos;
+
+    v_uv = a_texCoord;
+    v_color = a_color;
+    v_grain.xy = (vec2(h1, h3) * 2.0 - 1.0) * grainTilt;
+    v_grain.z  = 1.0 + (h3 * 2.0 - 1.0) * brightJitter;
+    v_grain.w  = 0.0;
+
+    return pos;
+  }
+}%
+
+CCProgram grain3dflat-fs %{
+  precision highp float;
+
+  in vec2 v_uv;
+  in vec4 v_color;
+  in vec4 v_grain;
+
+  uniform Constants {
+    vec4 lightDir;
+    float grainScale;
+    float sizeJitter;
+    float ambient;
+    float shadeStrength;
+    float brightJitter;
+    float grainTilt;
+  };
+
+  vec4 frag () {
+    float r2 = dot(v_uv, v_uv);
+    if (r2 > 1.0) discard;
+
+    vec3 N = vec3(v_uv + v_grain.xy, sqrt(clamp(1.0 - r2, 0.0, 1.0)));
+    N = normalize(N);
+    vec3 L = normalize(lightDir.xyz);
+
+    float ndl   = dot(N, L) * 0.5 + 0.5;
+    float shade = mix(1.0, ndl * ndl, shadeStrength);
+    float lit   = clamp(ambient + shade * (1.0 - ambient), 0.0, 1.0) * v_grain.z;
+
+    vec3 rgb = v_color.rgb * lit;
+    return vec4(rgb, 1.0);
+  }
+}%

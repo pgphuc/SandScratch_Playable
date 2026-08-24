@@ -1,0 +1,92 @@
+// Converted 2026-08-24 from Unity ir/shaders/__Game_SDK_SandFlow_Material_ObiGrainInstanced.shader
+// (SandFlow/GrainInstanced) — P4a nhánh A, ad sand-drop-jar-fill.
+// Unlit disc + vành mềm cùng màu (clone visual ObiFlatGrainParticles). Transparent, alpha-blend.
+//
+// KHONG DUNG GPU INSTANCING (khac Unity): mau per-hat doc tu a_color (vertex attribute, mesh gop 1 draw
+// call) thay vi UNITY_INSTANCING _Color instanced prop. Khong co jitter -> khong can attribute seed rieng.
+CCEffect %{
+techniques:
+- name: transparent
+  passes:
+  - vert: obigrain-vs:vert
+    frag: obigrain-fs:frag
+    depthStencilState:
+      depthTest: true
+      depthWrite: false
+    rasterizerState:
+      cullMode: none
+    blendState:
+      targets:
+      - blend: true
+        blendSrc: src_alpha
+        blendDst: one_minus_src_alpha
+        blendDstAlpha: one_minus_src_alpha
+    properties:
+      grainScale:  { value: 1.25, editor: { tooltip: "Grain Size (visual, doc lap radiusScale)", range: [0.1, 2] } }
+      borderWidth: { value: 0.3,  editor: { tooltip: "Border Width (ti le ban kinh)", range: [0, 1] } }
+      borderAlpha: { value: 0.8,  editor: { tooltip: "Border Alpha (do mo vanh)", range: [0, 1] } }
+}%
+
+CCProgram obigrain-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord; // corner ±1
+  in vec4 a_color;    // mau per-hat (thay UNITY_INSTANCING _Color)
+  in vec2 a_texCoord1;  // x = radius hat (world), yz = du tru
+
+  out vec2 v_uv;
+  out vec4 v_color;
+
+  uniform Constants {
+    float grainScale;
+    float borderWidth;
+    float borderAlpha;
+  };
+
+  vec4 vert () {
+    // MESH GOP (P4b 2026-08-24): a_position = TAM hat (world) hang so 4 dinh; goc quad dung lai tu a_texCoord
+    // (+-1) x radius. Nhan grainScale vao a_position se scale CA BAI CAT chu khong phai tung hat.
+    vec3 posOS = a_position + vec3(a_texCoord * (a_texCoord1.x * grainScale), 0.0);
+    vec4 pos = cc_matWorld * vec4(posOS, 1.0);
+    pos = cc_matViewProj * pos;
+    v_uv = a_texCoord;
+    v_color = a_color;
+    return pos;
+  }
+}%
+
+CCProgram obigrain-fs %{
+  precision highp float;
+
+  in vec2 v_uv;
+  in vec4 v_color;
+
+  uniform Constants {
+    float grainScale;
+    float borderWidth;
+    float borderAlpha;
+  };
+
+  vec4 frag () {
+    float r = length(v_uv);
+    if (r > 1.0) discard;
+
+    float coreEdge = 1.0 - borderWidth;
+    // fwidth() = derivative -> o path #version 100 Cocos sinh code can GL_OES_standard_derivatives, ma
+    // extension nay BI TAT -> EFX2406 (verify 2026-08-24 tu temp/logs/project.log).
+    // GLES3 (WebGL2) van dung fwidth that; GLES2 fallback AA co dinh -> APPROX, mep hat hoi cung hon.
+    #if __VERSION__ >= 300
+      float aa = max(fwidth(r), 1e-5);
+    #else
+      float aa = 0.03;
+    #endif
+    float core  = 1.0 - smoothstep(coreEdge - aa, coreEdge + aa, r);
+    float outer = 1.0 - smoothstep(1.0 - aa, 1.0, r);
+    float a = mix(borderAlpha, 1.0, core) * outer;
+
+    return vec4(v_color.rgb, a);
+  }
+}%

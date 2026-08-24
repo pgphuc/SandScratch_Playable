@@ -1,0 +1,93 @@
+// Converted 2026-08-24 from Unity ir/shaders/__Game_SDK_SandGameExtraction_Shader_SandSurface.shader
+// (Custom/SandSurface) — P4a nhánh A, ad sand-drop-jar-fill.
+// Edge/drop-shadow theo silhouette alpha của quad cát: ô cát xuất RGBA thẳng, ô trống dò cát ngược
+// _ShadowDir (multi-tap 6 bước) để vẽ bóng mềm bám mép. Không cần URP — dịch thẳng từ CGPROGRAM/UnityCG.
+// Default value lay tu material Assets/!_Game_SDK/SandGameExtraction/Shader/SandSurface.mat (ir/materials.json).
+// APPROX: _MainTex_ST (tiling/offset) khong xuat hien trong props cua material -> gia dinh identity (1,1,0,0),
+// KHONG dung TRANSFORM_TEX, dung thang v_uv = a_texCoord. _MainTex_TexelSize thay bang uniform mainTexTexelSize.
+// (textureSize() builtin KHONG dung duoc: Cocos dich sang texture2DSize o path #version 100 -> EFX2406.
+//  Verify 2026-08-24 tu temp/logs/project.log. TS phai set uniform nay khi gan texture.)
+CCEffect %{
+techniques:
+- name: transparent
+  passes:
+  - vert: sandsurface-vs:vert
+    frag: sandsurface-fs:frag
+    depthStencilState:
+      depthTest: true
+      depthWrite: false
+    rasterizerState:
+      cullMode: none
+    blendState:
+      targets:
+      - blend: true
+        blendSrc: src_alpha
+        blendDst: one_minus_src_alpha
+        blendDstAlpha: one_minus_src_alpha
+    properties:
+      mainTexture:    { value: white }
+      mainTexTexelSize: { value: [0.005, 0.005, 200, 200], editor: { tooltip: "1/width, 1/height, width, height cua mainTexture — TS PHAI set khi gan texture (thay _MainTex_TexelSize cua Unity)" } }
+      shadowColor:    { value: [0, 0, 0, 0.5], editor: { type: color, tooltip: "Shadow Color RGBA (HDR)" } }
+      shadowDir:      { value: [0, -1, 0, 0], editor: { tooltip: "Shadow Direction xy" } }
+      shadowDistance: { value: 4.0, editor: { tooltip: "Shadow Distance (texel)", range: [0, 16] } }
+      sandCutoff:     { value: 0.55, editor: { tooltip: "Sand Alpha Cutoff", range: [0, 1] } }
+}%
+
+CCProgram sandsurface-vs %{
+  precision highp float;
+  #include <builtin/uniforms/cc-global>
+  #include <builtin/uniforms/cc-local>
+
+  in vec3 a_position;
+  in vec2 a_texCoord;
+
+  out vec2 v_uv;
+
+  vec4 vert () {
+    vec4 pos = cc_matWorld * vec4(a_position, 1.0);
+    pos = cc_matViewProj * pos;
+    v_uv = a_texCoord;
+    return pos;
+  }
+}%
+
+CCProgram sandsurface-fs %{
+  precision highp float;
+
+  in vec2 v_uv;
+
+  uniform sampler2D mainTexture;
+
+  uniform Constants {
+    vec4 shadowColor;
+    vec4 shadowDir;
+    vec4 mainTexTexelSize;
+    float shadowDistance;
+    float sandCutoff;
+  };
+
+  #define SHADOW_STEPS 6
+
+  vec4 frag () {
+    vec4 col = texture(mainTexture, v_uv);
+    if (col.a >= sandCutoff) {
+      return col; // ô cát: xuất thẳng, grain đã bake trong RGB
+    }
+
+    vec2 texelSize = mainTexTexelSize.xy;
+    vec2 dir = normalize(shadowDir.xy + vec2(1e-6, 1e-6));
+    float shadow = 0.0;
+    for (int s = 1; s <= SHADOW_STEPS; s++) {
+      float dist = shadowDistance * float(s) / float(SHADOW_STEPS);
+      vec2 uv2 = v_uv - dir * dist * texelSize;
+      float a = texture(mainTexture, uv2).a;
+      if (a >= sandCutoff) {
+        shadow = max(shadow, 1.0 - float(s - 1) / float(SHADOW_STEPS));
+      }
+    }
+
+    vec4 outCol = shadowColor;
+    outCol.a *= shadow;
+    return outCol;
+  }
+}%
