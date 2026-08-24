@@ -20,6 +20,7 @@ import {
 } from 'cc';
 
 import { SandSolver, refreshOccupancy, type SolverParams } from '../solver/step';
+import { SandCellSolver } from '../solver/modeB';
 import { ConversionFront, type SandEmitRequest, type SandFlowBackend } from '../solver/conversionFront';
 import {
   BeltFullGate, countBeltGrains, fillRatio, isInBeltLocal, mouthFromCenterSize, type BeltRegion,
@@ -121,13 +122,21 @@ export class AdRoot extends Component {
   @property({ tooltip: 'HUD debug góc trái trên (hạt sống / emit / lọ hút / rơi khỏi rig / % đang chạy). TẮT trước khi build P5.' })
   debugHud = true;
 
+  /**
+   * A = port TS trung thực của solver Unity (PBD/DEM) — GIỮ TRỌN tuning nguồn, là bản chuẩn cho parity P6.
+   * B = cellular automaton (solver/modeB.ts) — rẻ ~10x, dùng khi A quá nặng; tuning tầng physics KHÁC HẲN,
+   * phải tune lại bằng mắt. ĐỪNG đọc số parity theo B.
+   */
+  @property({ tooltip: 'Solver cát: A = port trung thực (chuẩn parity) · B = cellular automaton (rẻ, tune riêng)' })
+  solverMode: string = 'A';
+
   // --- state ---
   private level!: LoadedLevel;
   private map!: PictureMap;
   private tex!: PictureTexture;
   private host!: SandPictureHost;
   private front!: ConversionFront;
-  private solver!: SandSolver;
+  private solver!: SandSolver | SandCellSolver;
   private rig!: SdfRig;
   private renderer: SandGrainRenderer | null = null;
   private runner: ScenarioRunner | null = null;
@@ -225,7 +234,7 @@ export class AdRoot extends Component {
     });
 
     // --- solver ---
-    this.solver = new SandSolver();
+    this.solver = this.solverMode.toUpperCase() === 'B' ? new SandCellSolver() : new SandSolver();
     const cap = grainPoolCapacity();
     this.solver.alloc(cap);
     this.rig = buildSdfRig();
