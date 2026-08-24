@@ -1,0 +1,305 @@
+{
+  "schema": "level-bake-index/1",
+  "levels": {
+    "0001": {
+      "file": "level-0001.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0001.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 288352,
+      "base64Bytes": 384472
+    },
+    "0002": {
+      "file": "level-0002.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0002.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 519683,
+      "base64Bytes": 692912
+    },
+    "0003": {
+      "file": "level-0003.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0003.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 513166,
+      "base64Bytes": 684224
+    },
+    "0004": {
+      "file": "level-0004.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0004.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 506803,
+      "base64Bytes": 675740
+    },
+    "0005": {
+      "file": "level-0005.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0005.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 492470,
+      "base64Bytes": 656628
+    },
+    "0006": {
+      "file": "level-0006.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0006.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": true,
+      "binaryBytes": 497525,
+      "base64Bytes": 663368
+    },
+    "0007": {
+      "file": "level-0007.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0007.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": true,
+      "binaryBytes": 535556,
+      "base64Bytes": 714076
+    },
+    "0008": {
+      "file": "level-0008.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0008.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": true,
+      "binaryBytes": 536495,
+      "base64Bytes": 715328
+    },
+    "0009": {
+      "file": "level-0009.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0009.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": true,
+      "binaryBytes": 596225,
+      "base64Bytes": 794968
+    },
+    "0010": {
+      "file": "level-0010.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0010.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 544051,
+      "base64Bytes": 725404
+    },
+    "0011": {
+      "file": "level-0011.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0011.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 262455,
+      "base64Bytes": 349940
+    },
+    "0012": {
+      "file": "level-0012.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0012.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": true,
+      "binaryBytes": 512861,
+      "base64Bytes": 683816
+    },
+    "0013": {
+      "file": "level-0013.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0013.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 300
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 600
+      },
+      "hasFrozenShapes": true,
+      "binaryBytes": 651276,
+      "base64Bytes": 868368
+    },
+    "0014": {
+      "file": "level-0014.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0014.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 300
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 600
+      },
+      "hasFrozenShapes": true,
+      "binaryBytes": 628760,
+      "base64Bytes": 838348
+    },
+    "0015": {
+      "file": "level-0015.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0015.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 300
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 600
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 667355,
+      "base64Bytes": 889808
+    },
+    "0016": {
+      "file": "level-0016.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0016.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 300
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 600
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 605271,
+      "base64Bytes": 807028
+    },
+    "0017": {
+      "file": "level-0017.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0017.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 502131,
+      "base64Bytes": 669508
+    },
+    "0018": {
+      "file": "level-0018.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0018.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 300
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 600
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 600743,
+      "base64Bytes": 800992
+    },
+    "0019": {
+      "file": "level-0019.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0019.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 300
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 600
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 665302,
+      "base64Bytes": 887072
+    },
+    "0020": {
+      "file": "level-0020.txt",
+      "sourcePath": "Assets/!_Game_SDK/Level/Level Database/SO/Release Level/Release Level 0020.asset",
+      "pixelLevelData": {
+        "width": 200,
+        "height": 200
+      },
+      "pixelViewData": {
+        "width": 400,
+        "height": 400
+      },
+      "hasFrozenShapes": false,
+      "binaryBytes": 596863,
+      "base64Bytes": 795820
+    }
+  }
+}
