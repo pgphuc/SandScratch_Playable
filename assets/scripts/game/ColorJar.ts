@@ -89,14 +89,23 @@ export class ColorJar extends Component {
    * Gọi từ vòng sim (không phải render): hút theo step giữ nhịp với vật lý, hút theo frame sẽ lệch khi frame drop.
    */
   harvest(pool: GrainParticlePool): number {
-    if (this.colorId < 0 || this.fullValue) return 0;
     this.ensureMouth();
+    return this.harvestWithMouth(pool, this.mouth);
+  }
+
+  /**
+   * Bản dùng hộp miệng NGOÀI. Nguồn Unity (ObiJarSink) KHÔNG hút tại chỗ đứng của lọ: vùng hút nằm ở RÃNH ĐÁY
+   * BELT (autoMouthOffset = (0,5,0) so với tâm head jar), còn lọ chỉ là đích của cung bay visual. JarColumns.ts
+   * giữ đúng tính chất đó — hộp miệng do CỘT cấp, không phải do node lọ.
+   */
+  harvestWithMouth(pool: GrainParticlePool, mouth: MouthBounds): number {
+    if (this.colorId < 0 || this.fullValue) return 0;
 
     const room = this.capacity - this.filledValue;
     if (room <= 0) { this.markFull(); return 0; }
 
     this.harvested.length = 0;
-    const got = harvestJar(pool, this.mouth, this.colorId, room, this.harvested);
+    const got = harvestJar(pool, mouth, this.colorId, room, this.harvested);
     if (got <= 0) return 0;
 
     this.filledValue += got;

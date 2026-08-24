@@ -24,6 +24,8 @@ export const SAND_TUNING = {
   grainWallFriction: 0.05000000074505806,
   grainWallGridEnabled: true,
   grainWallGridCellMul: 2,
+  grainWallGridIntegrate: true,
+  grainWallCompliance: 0.20000000298023224,
 
   // --- contact ---
   grainContactIterations: 4,
@@ -90,7 +92,7 @@ export const SAND_TUNING = {
   swipeBatchRevertDuration: 0.25,
   autoSwipeGhostMode: 'Always' as const,
 
-  // --- hình học phễu/khung (builder CHƯA port — xem ghi chú dưới) ---
+  // --- hình học phễu/khung (builder ĐÃ port ở P4b — xem SdfBuild.ts) ---
   capSegments: 32,
   edgeRadius: 0.5,
   entryGapWidth: 0.30000001192092896,
@@ -104,7 +106,55 @@ export const SAND_TUNING = {
   frameCornerRadius: 0.09000000357627869,
   buildTopWall: true,
   frameWallOutset: 0,
+  // 2 knob cùng nhóm, P4a chưa cần nên chưa chép — SdfBuild.ts đọc.
+  chuteJunctionCornerRadius: 0,
+  grainGateWallThicknessMul: 0.5,
 } as const;
+
+/**
+ * ConveyorShapeData — nguồn: ir/tuning.json, asset
+ * Assets/!_Game_SDK/SandFlow/Data/GrainBurst/ConveyorShape.asset. Đơn vị GEOMETRY-LOCAL (nhân RIG_LAYOUT.geomScale
+ * mới ra world), đúng như GrainFlowBackend.BuildSdfField đọc.
+ */
+export const CONVEYOR_SHAPE = {
+  bodyLength: 1.1299999952316284,
+  channelWidth: 0.25,
+  innerHoleRadius: 0.03500000014901161,
+} as const;
+
+/**
+ * ObiFlowLayoutConfig — nguồn: ir/tuning.json, asset .../GrainBurst/Layout.asset.
+ * · rig*  = pose + PHÓNG TO HÌNH HỌC của phễu/chute/khung/stadium (KHÔNG scale solver: gravity/radius giữ đơn vị thật).
+ * · quad* = pose SandQuadRoot = TRANH.
+ */
+export const RIG_LAYOUT = {
+  rigPositionX: 0,
+  rigPositionY: 3.200000047683716,
+  geomScale: 10.699999809265137,
+  quadPositionX: 0,
+  quadPositionY: 21,
+  quadScale: 0.4099999964237213,
+} as const;
+
+/**
+ * Cỡ world của 1 CELL tranh, TRƯỚC quadScale — `LevelSpawner.pictureCellWorldSize`.
+ *
+ * ⚠ Số này KHÔNG nằm trong IR: nó là SerializeField trên prefab LevelSpawner, mà prefab không được extract ở P1.
+ * Suy ra bằng 2 mốc ĐỘC LẬP trong chính source Unity, cả hai cùng cho 0.25:
+ *  1. GrainFlowBackend.BuildOccupancyField, comment đo thật "@881a4aca, level 200px, cellWorld=0.1025"
+ *     -> 0.1025 / quadScale(0.41) = 0.25.
+ *  2. Cùng comment: "hạt chỉ dày 2.34 ô", với grainParticleRadius = 0.12
+ *     -> 2*0.12 / 0.1025 = 2.341 ô. Khớp.
+ * Kiểm chéo hình học: nửa bề ngang tranh = 200*0.1025/2 = 10.25; tường khung ở wallX*geomScale = 10.7
+ * -> tranh LỌT trong khung, hở 0.45 world mỗi bên (đúng "khe nền" mà nguồn mô tả).
+ * Kiểm chéo dọc: tranh cao 20.5, tâm ở quadPositionY=21 -> [10.75 .. 31.25]; khung từ funnelTop 8.73 tới
+ * wallTop 31.74 -> tranh nằm trọn trong khung, còn topHeadroom ~0.5. Ba phép kiểm này độc lập nhau.
+ */
+export const PICTURE_CELL_WORLD_SIZE = 0.25;
+
+/** Cỡ world 1 pixel CƠ CHẾ của tranh = pictureCellWorldSize × quadScale. */
+export const PICTURE_PIXEL_WORLD = PICTURE_CELL_WORLD_SIZE * RIG_LAYOUT.quadScale;
+
 
 /**
  * `autoSwipeRemainingThreshold` KHÔNG có trong GrainTuningConfig của nguồn — nó là knob mà front đọc để tự gạt nốt

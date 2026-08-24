@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "0.2.0",
+  "id": "kb1-clear-4-jars",
+  "label": "KB1 — clear 4 ColorJar rồi arm CTA",
+
+  "meta": {
+    "game": "sand_drop",
+    "level": "Release Level 0001",
+    "durationSec": 30,
+    "orientation": "portrait"
+  },
+
+  "input": {
+    "idleTimeoutSec": 3,
+    "handHint": {
+      "gesture": "swipe_stroke",
+      "loop": true,
+      "hideOnFirstInput": true,
+      "reshowAfterIdleSec": 3,
+      "path": [[0.30, 0.62], [0.70, 0.62]]
+    }
+  },
+
+  "goal": {
+    "type": "jars_cleared",
+    "count": 4,
+    "_note": "đếm sự kiện ColorJar.OnFull. Level 0001 có 14 lọ / 4 cột, capacity ~1459 mỗi lọ -> 4 lọ ≈ 5836 hạt phải cào và rơi đúng màu."
+  },
+
+  "fallback": {
+    "type": "elapsed",
+    "afterSec": 30,
+    "_note": "goal không đạt trong 30s thì vẫn ARM CTA — ad không bao giờ kẹt."
+  },
+
+  "beats": [
+    { "id": "hint-in", "at": 0.6, "action": "hand_hint", "params": { "gesture": "swipe_stroke", "loop": true } },
+    { "id": "hint-off", "when": "first_swipe", "action": "hide_hand_hint", "params": {} },
+    { "id": "hint-back", "when": "idle_3s", "action": "hand_hint", "params": { "gesture": "swipe_stroke", "loop": true } },
+    { "id": "arm", "when": "goal_reached", "action": "arm_cta", "params": {} },
+    { "id": "arm-fallback", "when": "fallback_reached", "action": "arm_cta", "params": {} }
+  ],
+
+  "cta": {
+    "mode": "arm_on_goal",
+    "trigger": "next_pointer_down",
+    "storeUrl": "https://play.google.com/store/apps/details?id=com.puzzle.sandscratch",
+    "perNetwork": {
+      "applovin":   { "api": "mraid.open",              "usesUrl": true },
+      "unityads":   { "api": "mraid.open",              "usesUrl": true },
+      "ironsource": { "api": "mraid.open",              "usesUrl": true },
+      "mintegral":  { "api": "window.install",          "usesUrl": true },
+      "pangle":     { "api": "tiktok-specific",         "usesUrl": true },
+      "meta":       { "api": "FbPlayableAd.onCTAClick", "usesUrl": false,
+                      "_note": "KHÔNG nhận URL — đích đến do Meta cấu hình phía ad setup. storeUrl bị bỏ qua." }
+    },
+    "visualCue": {
+      "enabled": true,
+      "kind": "floating_button",
+      "_note": "CHỐT 2026-08-22: nút CTA nổi có chữ. CTA vẫn armed kiểu next_pointer_down — nút là TÍN HIỆU, chạm chỗ nào cũng mở store, không bắt buộc trúng nút. Gameplay KHÔNG bị chắn.",
+      "anchor": "bottom_center",
+      "marginBottomPct": 0.08,
+      "widthPct": 0.62,
+      "animation": "pulse_scale",
+      "pulse": {
+        "cycles": 3,
+        "scaleFrom": 1,
+        "scaleTo": 1.08,
+        "periodSec": 0.6,
+        "thenHold": true
+      },
+      "art": {
+        "status": "PENDING_USER",
+        "asset": "assets/ad/cta-button.png",
+        "textInImage": true,
+        "_note": "1 PNG duy nhất ĐÃ IN SẴN CHỮ -> không cần font bitmap runtime, tiết kiệm 50-150KB và tránh i18n. Chưa có art -> P4 dựng placeholder vẽ bằng Graphics, thay PNG sau, không sửa code."
+      }
+    }
+  }
+}

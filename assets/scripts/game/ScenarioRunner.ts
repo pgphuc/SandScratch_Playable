@@ -57,6 +57,8 @@ export class ScenarioRunner extends Component {
   handHintNode: Node | null = null;
 
   private scenario!: ScenarioJson;
+  /** AdRoot nạp scenario BẤT ĐỒNG BỘ (resources.load) nên component sống trước khi có data — update() phải câm tới lúc đó. */
+  private started = false;
   private adapter!: NetworkAdapter;
 
   private phaseValue: ScenarioPhase = 'running';
@@ -85,6 +87,7 @@ export class ScenarioRunner extends Component {
                       `(không bao giờ arm CTA). Packer phải fail trước khi tới đây.`);
     }
     this.scenario = json;
+    this.started = true;
     this.adapter = new NetworkAdapter(network, json.cta.storeUrl ?? '');
 
     this.phaseValue = 'running';
@@ -140,6 +143,7 @@ export class ScenarioRunner extends Component {
   // ==================================================================== vòng thời gian
 
   update(dt: number): void {
+    if (!this.started) return;
     this.elapsed += dt;
 
     // beat "hint-in" at: 0.6s. Trước mốc đó hint ẩn. Sau mốc, hint theo luật idle/first-input.
@@ -183,6 +187,7 @@ export class ScenarioRunner extends Component {
   // ==================================================================== input
 
   private onTouchStart(_e: EventTouch): void {
+    if (!this.started) return;
     if (this.phaseValue === 'armed') {
       this.phaseValue = 'opened';
       this.adapter.open();
@@ -197,6 +202,7 @@ export class ScenarioRunner extends Component {
   }
 
   private onTouchEnd(_e: EventTouch): void {
+    if (!this.started) return;
     if (this.phaseValue === 'opened') return;
     this.idleFor = 0;
     this.countSwipe();
