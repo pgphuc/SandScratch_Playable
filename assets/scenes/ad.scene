@@ -116,9 +116,15 @@
     "__prefab": null,
     "levelResPath": "data/level-0001",
     "scenarioResPath": "data/scenario",
-    "brushRadiusCells": 3,
+    "boardLayoutResPath": "data/board-layout",
+    "brushRadiusCells": 10,
     "network": "applovin",
     "debugHud": true,
+    "solverMode": "A",
+    "showRigStandIn": true,
+    "staticProbe": true,
+    "staticProbePeriod": 2,
+    "staticProbeSink": "http://127.0.0.1:7799/",
     "_id": "ad-comp-adroot"
   },
   {
