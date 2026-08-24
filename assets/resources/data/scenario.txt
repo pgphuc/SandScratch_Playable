@@ -15,8 +15,8 @@
     "handHint": {
       "gesture": "swipe_stroke",
       "loop": true,
-      "hideOnFirstInput": true,
-      "reshowAfterIdleSec": 3,
+      "hideOnFirstInput": false,
+      "reshowAfterIdleSec": 15,
       "path": [[0.30, 0.62], [0.70, 0.62]]
     }
   },
