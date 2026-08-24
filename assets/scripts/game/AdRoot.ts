@@ -43,6 +43,7 @@ import { JarColumns, type JarColumnSpec } from './JarColumns';
 import { HandHint } from './HandHint';
 import { attachQuad } from './QuadVisual';
 import { attachBox, boxTextureName } from './BoxVisual';
+import { buildBoardVisual, BOARD_LAYERS } from './BoardVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
 import { probeStatic } from './StaticProbe';
@@ -181,6 +182,8 @@ export class AdRoot extends Component {
   private boxPrefab: Prefab | null = null;
   /** hex HOA 6 ký tự -> atlas màu của hộp. Thiếu màu nào thì hộp màu đó chỉ có mesh trắng. */
   private readonly boxTex: Record<string, Texture2D> = {};
+  /** Số lớp art nền dựng được (BoardVisual). < BOARD_LAYERS.length = có PNG chưa nạp được. */
+  private boardLayers = 0;
 
   private solverParams!: SolverParams;
   private occ!: GrainOccupancyField;
@@ -309,10 +312,28 @@ export class AdRoot extends Component {
     this.buildPicture(pictureMat);
     this.buildGrainRenderer(grainMat, cap);
     await this.loadBoxArt();
+    // Art nền dựng TRƯỚC lọ/CTA nhưng z của nó nằm sau tất cả, nên thứ tự dựng không quyết định thứ tự vẽ.
+    const boardTex = await Promise.all(BOARD_LAYERS.map((L) => loadResOpt(`${L.res}/texture`, Texture2D)));
+    this.boardLayers = buildBoardVisual(this.node, boardTex);
     this.buildJars();
     this.setupScenario(scenarioTxt);
     this.syncOccupancy();
     this.ready = true;
+    this.reportBoot();
+  }
+
+  /** 1 lô log lúc boot xong: art nào nạp được, dựng được bao nhiêu lọ. Trả lời thẳng "sao không thấy asset". */
+  private reportBoot(): void {
+    const texKeys = Object.keys(this.boxTex);
+    const lines = [
+      `[boot] mode=${this.solverMode.toUpperCase()} lo=${this.level.jars.length} `
+      + `poolCap=${this.solver.pool.capacity} rigStandIn=${this.showRigStandIn}`,
+      `[boot] art: boxPrefab=${this.boxPrefab !== null ? 'OK' : 'THIEU'} `
+      + `boxTex=[${texKeys.join(',')}] ctaTex=${this.ctaTex !== null ? 'OK' : 'THIEU'} `
+      + `board=${this.boardLayers}/${BOARD_LAYERS.length}`,
+    ];
+    for (const l of lines) console.log(l);
+    this.sendProbe(lines);
   }
 
   // ==================================================================== dựng cây node
@@ -737,7 +758,11 @@ export class AdRoot extends Component {
   private sendProbe(lines: string[]): void {
     const url = this.staticProbeSink;
     if (url === '' || typeof fetch !== 'function') return;
-    const mode = `mode=${this.solverMode.toUpperCase()} t=${(this.runner?.secondsElapsed ?? 0).toFixed(1)}s`;
+    // Bộ đếm 3 cửa hạt đi kèm MỖI lô: pool rỗng mà emit=0 là bug ĐƯỜNG SINH, còn emit lớn mà pool rỗng là
+    // bug đường THOÁT — 2 hướng điều tra khác hẳn nhau, không có 2 số này thì đoán mò.
+    const mode = `mode=${this.solverMode.toUpperCase()} t=${(this.runner?.secondsElapsed ?? 0).toFixed(1)}s `
+      + `emit=${this.emittedTotal} drop=${this.emitDroppedCount} loHut=${this.harvestedTotal} `
+      + `roiKhoiRig=${this.killedTotal} respawn=${this.lastRespawned}`;
     try {
       void fetch(url, { method: 'POST', body: `--- ${mode}\n${lines.join('\n')}` }).catch(() => { /* im lặng */ });
     } catch (e) { /* im lặng */ }
