@@ -141,11 +141,12 @@ export class AdRoot extends Component {
   solverMode: string = 'A';
 
   /**
-   * Hình khối STAND-IN của rig (khung/phễu/vành) vẽ thẳng từ SDF. Bật để nhìn thấy chỗ cát bị chặn khi chưa
-   * có art PNG thật (prefab GameBoard chưa extract). TẮT khi đã ráp art thật.
+   * Hình khối STAND-IN của rig (khung/phễu/vành) vẽ thẳng từ SDF. Từ 2026-08-24 MẶC ĐỊNH TẮT: art thật (Artboard +
+   * khungbangchuyen + Bangchuyen2) đã ráp nên stand-in chỉ còn là công cụ CHẨN ĐOÁN — bật khi cần thấy
+   * chính xác chỗ cát bị chặn, vì nó vẽ THẲNG từ SDF nên không thể lệch so với va chạm thật.
    */
   @property({ tooltip: 'Vẽ hình khối stand-in của rig từ SDF (khung/phễu/vành). Tắt khi đã có art PNG thật.' })
-  showRigStandIn = true;
+  showRigStandIn = false;
 
   /**
    * Probe CHẨN ĐOÁN hạt đứng im (game/StaticProbe.ts) — in ra console mỗi `staticProbePeriod` giây, phân loại
