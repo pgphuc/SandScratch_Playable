@@ -1,0 +1,40 @@
+# Repo nay co core.autocrlf=input. KHONG CO file nay thi git coi .fbx/.png la TEXT va strip byte CR
+# khi luu blob -> HONG file binary mot cach IM LANG (chi phat hien khi Cocos import loi).
+# Vap that 2026-08-24 (P4b): commit 7 file .fbx bi canh bao "CRLF will be replaced by LF".
+
+# Mac dinh: text, chuan hoa ve LF trong repo.
+* text=auto eol=lf
+
+# --- BINARY: khong duoc dung den mot byte nao ---
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.tga  binary
+*.psd  binary
+*.fbx  binary
+*.glb  binary
+*.gltf binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary
+*.mp3  binary
+*.ogg  binary
+*.wav  binary
+*.m4a  binary
+*.mp4  binary
+*.webm binary
+*.zip  binary
+*.bin  binary
+
+# --- TEXT, ep LF ro rang ---
+*.ts     text eol=lf
+*.js     text eol=lf
+*.json   text eol=lf
+*.meta   text eol=lf
+*.effect text eol=lf
+*.scene  text eol=lf
+*.prefab text eol=lf
+*.md     text eol=lf
