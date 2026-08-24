@@ -106,11 +106,13 @@ export class ScenarioRunner extends Component {
   onEnable(): void {
     // Bắt chạm ở tầng GLOBAL: CTA armed thì chạm CHỖ NÀO cũng mở store, không cần trúng nút.
     input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
+    input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
     input.on(Input.EventType.TOUCH_END, this.onTouchEnd, this);
   }
 
   onDisable(): void {
     input.off(Input.EventType.TOUCH_START, this.onTouchStart, this);
+    input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
     input.off(Input.EventType.TOUCH_END, this.onTouchEnd, this);
   }
 
@@ -151,7 +153,13 @@ export class ScenarioRunner extends Component {
     if (this.elapsed < 0.6 && !this.sawFirstInput) this.showHandHint(false);
     else if (!this.sawFirstInput) this.showHandHint(true);
 
-    if (this.sawFirstInput) {
+    // HIỆN LẠI SAU IDLE — chỉ khi scenario KHÔNG bật hideOnFirstInput.
+    //
+    // ⚠ SỬA 2026-08-24 (user báo: "bàn tay vẫn tiếp tục xuất hiện kể cả khi đã click 1 lần"). Cờ
+    // `hideOnFirstInput` có trong scenario.json từ P3 nhưng code CHƯA BAO GIỜ ĐỌC — hint luôn quay lại sau
+    // reshowAfterIdleSec = 3s. Ngữ nghĩa đúng: hideOnFirstInput = true nghĩa là ĐỘNG VÀO 1 LẦN LÀ TẮT HẲN,
+    // reshowAfterIdleSec chỉ còn hiệu lực cho kịch bản để cờ đó = false.
+    if (this.sawFirstInput && !this.scenario.input.handHint.hideOnFirstInput) {
       this.idleFor += dt;
       const back = this.scenario.input.handHint.reshowAfterIdleSec;
       if (back > 0 && this.idleFor >= back) this.showHandHint(true);
@@ -199,6 +207,15 @@ export class ScenarioRunner extends Component {
     }
     this.idleFor = 0;
     this.showHandHint(false);
+  }
+
+  /**
+   * Giữ ngón KÉO cũng là "đang tương tác". Không có handler này thì `idleFor` vẫn tăng suốt cú vuốt dài ->
+   * hint nhảy ra ĐÈ GIỮA LÚC ĐANG VUỐT (chỉ lộ ra ở kịch bản để hideOnFirstInput = false).
+   */
+  private onTouchMove(_e: EventTouch): void {
+    if (!this.started) return;
+    this.idleFor = 0;
   }
 
   private onTouchEnd(_e: EventTouch): void {

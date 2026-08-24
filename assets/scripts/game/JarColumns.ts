@@ -7,12 +7,17 @@
 //     => 4 hộp miệng cùng phủ rãnh đáy, LỌC THEO MÀU. Hạt màu C bị hút bởi đúng cột đang có head màu C.
 //  3. Head đầy -> lọ rời sân, lọ kế dồn lên slot trên.
 //
-// LỆCH CÓ CHỦ Ý so với nguồn, và vì sao:
-// · Nguồn cho mỗi cột 1 hộp hẹp (autoMouthSize 0.6×0.5) đặt đúng chỗ cột đó đón hạt trên belt ĐANG CHẠY.
-//   Ở ad này belt = 0 (ConveyorController là shell no-op, manifest P2 chốt bake data-only) nên hạt KHÔNG được
-//   chở đi đâu cả — chúng đọng ngay dưới miệng chute. Hộp hẹp per-cột sẽ làm 2/4 cột chết đói. Nên hộp của cả
-//   4 cột phủ TRỌN rãnh đáy; việc phân luồng do bộ lọc màu đảm nhiệm, y như nguồn.
-//   ⚠ Đây là chỗ ĐẦU TIÊN phải sửa nếu P6 quyết định làm belt chạy thật.
+// LỊCH SỬ 1 BUG — ĐỌC TRƯỚC KHI NỚI HỘP HÚT RA LẠI:
+// Bản 2026-08-24 (và trước đó) cho CẢ 4 CỘT dùng CHUNG một hộp phủ TRỌN rãnh đáy vành, lấy lý do "belt = 0 nên
+// hộp hẹp làm 2/4 cột chết đói". Hai vế đều hỏng:
+//  · belt KHÔNG hề = 0 — lực belt nằm ở GrainFlowBackend chứ không ở ConveyorController (đã sửa, Cocos 2b1b078);
+//  · "0.6×0.5" là DEFAULT trong ObiJarSink.cs, không phải số serialize. Số thật trên prefab là 2.3×3.
+// Hậu quả: harvestJar gọi pool.removeAt -> nguyên đường chạy DƯỚI của băng chuyền thành máy hút, hạt vừa tới
+// rãnh là bốc hơi trước khi belt kịp chở đi. Nhìn ra ngoài = "cát tự biến mất" + "băng chuyền đứng im".
+// Giờ mỗi cột có hộp RIÊNG tại chỗ đứng của nó (AdRoot.buildJars), đúng nguồn: 4×2.3 = 9.2 trên dấu chân belt
+// ~18.2 world -> hở ~50% cho hạt chạy vòng. Phân luồng vẫn do bộ lọc màu, và belt chạy vòng nên hạt màu C sớm
+// muộn cũng đi qua hộp của cột C.
+//
 // · Cung bay visual của hạt (JarGrainVisual, parabol SandJump) KHÔNG port: nó là VFX, không đổi số đếm.
 
 import { Node, Vec3, tween } from 'cc';
@@ -22,15 +27,15 @@ import type { ColorJar } from './ColorJar';
 
 /** Giữ head "đầy" trên sân bấy nhiêu giây cho anim burst chạy hết rồi mới cho lọ kế dồn lên. */
 const CLEAR_HOLD_SEC = 0.45;
-/** Thời gian tween dồn cột — nguồn: ColorJarController.repositionDuration = 0.3. */
-const REPOSITION_SEC = 0.3;
+/** Thời gian tween dồn cột — nguồn: ColorJarController.repositionDuration = 0.15 (prefab Game_Specifics). */
+const REPOSITION_SEC = 0.15;
 
 export interface JarColumnSpec {
   /** Lọ theo đúng thứ tự slot trong IR (slot 0 = head lúc bắt đầu). */
   jars: ColorJar[];
   /** Vị trí world của từng slot; slot i là chỗ đứng của lọ thứ i còn sống. */
   slots: Vec3[];
-  /** Hộp hút của cột (rãnh đáy belt). */
+  /** Hộp hút RIÊNG của cột: tâm = tâm head jar + autoMouthOffset, cỡ = autoMouthSize (nguồn ObiJarSink). */
   mouth: MouthBounds;
 }
 

@@ -15,13 +15,13 @@
 // Renderer đồng bộ 1 lần/FRAME (không phải mỗi step): 2 step trong 1 frame ghi mesh 2 lần cho cùng 1 hình.
 
 import {
-  Asset, Camera, Color, Component, EventTouch, Input, Material, Node, TextAsset, Texture2D, Vec3,
-  input, resources, view, _decorator,
+  Asset, Camera, Canvas, Color, Component, EventTouch, Input, Label, Layers, Material, Node, TextAsset,
+  Texture2D, UITransform, Vec3, input, resources, view, _decorator,
 } from 'cc';
 
 import { SandSolver, refreshOccupancy, type SolverParams } from '../solver/step';
 import { ConversionFront, type SandEmitRequest, type SandFlowBackend } from '../solver/conversionFront';
-import type { MouthBounds } from '../solver/counting';
+import { mouthFromCenterSize } from '../solver/counting';
 import type { GrainOccupancyField } from '../solver/occupancy';
 
 import {
@@ -59,12 +59,41 @@ const SIM_DT = 1 / 30;
 const CAM_HALF_HEIGHT = 19.2;
 const CAM_CENTER_Y = 13;
 
-/** 4 cột lọ, x world. Trải đều trong dấu chân belt (±(halfBody+rOut)·geomScale ≈ ±9.1). */
-const JAR_COLUMN_X = [-6.9, -2.3, 2.3, 6.9];
-/** Slot đứng của lọ trong 1 cột (y world). Slot 0 = head. */
-const JAR_SLOT_Y = [-2.2, -5.4, -8.6];
+// ============================================================ LAYOUT LỌ — SỐ THẬT TỪ PREFAB (2026-08-24)
+//
+// Nguồn: ir/particles/__Game_SDK_Level_Prefabs_Game_Specifics.prefab.yaml §ColorJarController (&4927878577378634387)
+//   pointA (SpawnPoint, &8579220994057226019) localPosition = (0, -2, -2); cha ColorJarController ở (0,0,0),
+//     cha nữa (root Game_Specifics) ở (0,0,0)  =>  pointA world 2D = (0, -2).
+//   columnSpacing = 4.2 · headLocalYZ = (-0.5, 0) · secondLocalYZ = (-2.75, -2) · jarYStep = -1.5 · jarZStep = -2
+//
+// ⚠ ĐÍNH CHÍNH note 92 của job.json: prefab này ĐÃ ĐƯỢC EXTRACT ở P1 (ir/particles/, 36 file). Ghi chú cũ "chỗ
+// đứng của lọ KHÔNG có nguồn Unity, số ở đây là ĐẶT TAY" là SAI. Số đặt tay cũ ([-6.9,-2.3,2.3,6.9] /
+// [-2.2,-5.4,-8.6]) tình cờ khá sát, nhưng từ đây dùng số nguồn.
+//
+// Trục Z của nguồn (jarZStep = -2: lọ lùi dần về sau) BỎ — ad này phẳng 2D, chỉ giữ trục Y.
+
+const JAR_POINT_A_X = 0;
+const JAR_POINT_A_Y = -2;
+const JAR_COLUMN_SPACING = 4.2;
+/** 4 cột đối xứng quanh pointA.x -> [-6.3, -2.1, 2.1, 6.3]. */
+const JAR_COLUMN_X = [0, 1, 2, 3].map((c) => JAR_POINT_A_X + (c - 1.5) * JAR_COLUMN_SPACING);
+/** Slot 0 = head (headLocalYZ.x), slot 1 = secondLocalYZ.x, slot 2 trở đi cộng dồn jarYStep. */
+const JAR_SLOT_Y = [
+  JAR_POINT_A_Y - 0.5,
+  JAR_POINT_A_Y - 2.75,
+  JAR_POINT_A_Y - 2.75 - 1.5,
+];
 const JAR_W = 3.6;
 const JAR_H = 2.6;
+
+// ---- hộp hút (ObiJarSink &7977750162497774786, CÙNG prefab) ----
+// autoMouthFromJars = 1 · autoMouthOffset = (0, 4, 0) · autoMouthSize = (2.3, 3) · columnMouthOverrides = []
+//
+// ⚠ ĐÍNH CHÍNH note 91: "autoMouthSize 0.6×0.5" là DEFAULT trong ObiJarSink.cs, KHÔNG phải giá trị serialize
+// trên prefab. Số thật là 2.3×3.
+const JAR_MOUTH_OFFSET_Y = 4;
+const JAR_MOUTH_W = 2.3;
+const JAR_MOUTH_H = 3;
 
 /** z từng lớp — tranh phải Ở SAU hạt, nếu không pass transparent của tranh vẽ đè lên hạt opaque. */
 const Z_PICTURE = -0.05;
@@ -86,6 +115,9 @@ export class AdRoot extends Component {
 
   @property({ tooltip: 'network id của variant đang build' })
   network: string = 'applovin';
+
+  @property({ tooltip: 'HUD debug góc trái trên (hạt sống / emit / lọ hút / rơi khỏi rig / % đang chạy). TẮT trước khi build P5.' })
+  debugHud = true;
 
   // --- state ---
   private level!: LoadedLevel;
@@ -119,6 +151,16 @@ export class AdRoot extends Component {
   lastRespawned = 0;
   /** Số lệnh emit bị trượt vì pool đầy. > 0 = capacity thấp hơn throttle, hoặc throttle không chạy. */
   emitDroppedCount = 0;
+
+  // ---- đếm cho HUD debug: 3 CỬA hạt rời pool, tách bạch để nhìn 1 phát biết hạt đi đâu ----
+  /** Hạt đã sinh ra từ tranh (ConversionFront). */
+  private emittedTotal = 0;
+  /** Hạt bị LỌ hút (harvestJar -> pool.removeAt). */
+  private harvestedTotal = 0;
+  /** Hạt bị killBelowY loại (rơi lọt khỏi rig). */
+  private killedTotal = 0;
+  private hudLabel: Label | null = null;
+  private hudTimer = 0;
 
   // ==================================================================== khởi tạo
 
@@ -256,32 +298,33 @@ export class AdRoot extends Component {
   }
 
   /**
-   * 14 lọ / 4 cột. Hộp hút của MỌI cột = rãnh đáy vành stadium (xem ghi chú đầu JarColumns.ts về việc belt = 0).
+   * 14 lọ / 4 cột. Layout + hộp hút lấy từ prefab (xem khối hằng số LAYOUT LỌ ở đầu file).
    *
-   * ⚠ CHỖ ĐỨNG của lọ (JAR_COLUMN_X / JAR_SLOT_Y / cỡ lọ) KHÔNG có nguồn Unity: nó nằm trên prefab
-   * ColorJarController (pointA + columnSpacing + headLocalYZ + jarZStep) mà P1 KHÔNG extract prefab. Số ở đây là
-   * ĐẶT TAY cho khung hình dọc của ad — không phải bake từ IR. Muốn khớp bản Unity thì phải extract prefab đó.
+   * ⚠ SỬA 2026-08-24 — ĐÂY LÀ BUG LÀM "CÁT BIẾN MẤT" VÀ "BĂNG CHUYỀN ĐỨNG IM":
+   * bản trước cấp cho CẢ 4 CỘT một hộp hút phủ TRỌN nửa dưới vành stadium (|x| tới ±(halfBody+rOut)·geomScale,
+   * y từ tâm vành xuống mép ngoài). `harvestJar` (solver/counting.ts) gọi `pool.removeAt` -> toàn bộ đường
+   * chạy DƯỚI của băng chuyền là một cái MÁY HÚT: hạt vừa rơi tới rãnh là bốc hơi, không kịp được belt chở đi
+   * đâu. Nhìn ra ngoài y hệt "belt chết + cát tự biến mất".
+   * Lý do cũ ("belt = 0 nên hộp hẹp làm 2/4 cột chết đói") đã hết hiệu lực từ lúc belt chạy thật (Cocos 2b1b078).
+   *
+   * Hộp đúng theo nguồn: tâm = tâm HEAD JAR của cột + autoMouthOffset, cỡ = autoMouthSize.
+   * Với 4 cột thì 4 hộp phủ 4×2.3 = 9.2 world trên dấu chân belt rộng ~18.2 -> hở ~50% cho hạt chạy vòng.
    */
   private buildJars(): void {
     const jarRoot = new Node('Jars');
     jarRoot.setParent(this.node);
 
-    const sdf = this.rig.sdf;
-    const g = RIG_LAYOUT.geomScale;
-    // Rãnh ĐÁY vành: từ mép ngoài vành lên tới tâm vành. x phủ trọn dấu chân belt (kể cả 2 chỏm).
-    const mouth: MouthBounds = {
-      minX: RIG_LAYOUT.rigPositionX - (sdf.halfBody + sdf.rOut) * g,
-      maxX: RIG_LAYOUT.rigPositionX + (sdf.halfBody + sdf.rOut) * g,
-      minY: RIG_LAYOUT.rigPositionY - sdf.rOut * g,
-      maxY: RIG_LAYOUT.rigPositionY,
-    };
+    const headY = JAR_SLOT_Y[0];
+    const mouthCenterY = headY + JAR_MOUTH_OFFSET_Y;
 
     const specs: JarColumnSpec[] = [];
     for (let c = 0; c < JAR_COLUMN_X.length; c++) {
+      const cx = JAR_COLUMN_X[c];
       specs.push({
         jars: [],
-        slots: JAR_SLOT_Y.map((y) => new Vec3(JAR_COLUMN_X[c], y, Z_JAR)),
-        mouth,
+        slots: JAR_SLOT_Y.map((y) => new Vec3(cx, y, Z_JAR)),
+        // Hộp RIÊNG từng cột — KHÔNG dùng chung 1 object, mỗi cột 1 bbox tại chỗ đứng của chính nó.
+        mouth: mouthFromCenterSize(cx, mouthCenterY, JAR_MOUTH_W, JAR_MOUTH_H),
       });
     }
 
@@ -466,7 +509,10 @@ export class AdRoot extends Component {
         hasOcc: 1, occ: this.occ,
         occSnapshot: this.occDilated, occSnapshotRaw: this.occRaw, occNormals: this.occNormals,
         occSlip: SAND_TUNING.grainOccupancySlip,
-        hasSdf: 1, sdf, gapBeltTopY: 0,
+        // gapBeltTopY phải TRÙNG integrate (integrate.ts:172 vs contact.ts:468 dùng chung công thức trần vortex).
+        // Hiện chỉ nuôi `inConveyor` = cửa quyết định NGỦ, mà sleep đã tắt cứng -> đường chết; vẫn để đúng để
+        // bật lại sleep không kéo theo bug lệch vùng.
+        hasSdf: 1, sdf, gapBeltTopY: this.rig.sdf.beltTopY,
         // SLEEP TẮT CỨNG (user chốt 2026-08-24: bên Unity sleep chỉ để test, luôn tắt — ir/tuning.json cũng ghi
         // grainSleepEnabled = false). Không đọc SAND_TUNING nữa để không ai bật nhầm qua tuning.
         // Toán tiếp xúc không đổi: mọi chỗ rẽ nhánh theo asleep (share 1 vs ½) rơi hết về nhánh "thức".
@@ -496,7 +542,8 @@ export class AdRoot extends Component {
       req.colorId, req.carriedCount,
       ghost, ghost ? req.ghostReleaseY : 0, false,
     );
-    if (!ok) this.emitDroppedCount++;
+    if (ok) this.emittedTotal++;
+    else this.emitDroppedCount++;
   }
 
   // ==================================================================== input vuốt
@@ -582,13 +629,107 @@ export class AdRoot extends Component {
     this.tex.update(dt);
     this.jarColumns?.tickVisual(dt);
     if (this.renderer !== null) this.renderer.syncFromPool(this.solver.pool);
+    if (this.debugHud) this.tickHud(dt);
+  }
+
+  // ==================================================================== HUD debug
+
+  /**
+   * Canvas UI RIÊNG + camera RIÊNG. Cảnh này không có Canvas nào (mọi thứ là node 3D + QuadVisual), mà `Label`
+   * là UI renderer nên bắt buộc phải có. Tách camera để không đụng `gameCamera`: camera HUD chỉ thấy UI_2D,
+   * camera game chỉ thấy DEFAULT, clearFlags DONT_CLEAR để HUD vẽ ĐÈ chứ không xoá cảnh.
+   */
+  private buildHud(): void {
+    const parent = this.node.parent ?? this.node;
+
+    const camNode = new Node('HudCamera');
+    camNode.layer = Layers.Enum.UI_2D;
+    camNode.setParent(parent);
+    const cam = camNode.addComponent(Camera);
+    cam.projection = Camera.ProjectionType.ORTHO;
+    cam.clearFlags = Camera.ClearFlag.DONT_CLEAR;
+    cam.visibility = Layers.Enum.UI_2D;
+    cam.priority = 100;         // vẽ SAU camera game
+    cam.near = 1;
+    cam.far = 2000;
+
+    const canvasNode = new Node('HudCanvas');
+    canvasNode.layer = Layers.Enum.UI_2D;
+    canvasNode.setParent(parent);
+    const canvas = canvasNode.addComponent(Canvas);
+    canvas.cameraComponent = cam;
+
+    const size = view.getVisibleSize();
+    const labelNode = new Node('HudLabel');
+    labelNode.layer = Layers.Enum.UI_2D;
+    labelNode.setParent(canvasNode);
+    const ut = labelNode.addComponent(UITransform);
+    ut.setAnchorPoint(0, 1);    // neo góc TRÁI-TRÊN
+    ut.setContentSize(size.width, size.height);
+    labelNode.setPosition(-size.width * 0.5 + 12, size.height * 0.5 - 12, 0);
+
+    const label = labelNode.addComponent(Label);
+    label.fontSize = 22;
+    label.lineHeight = 26;
+    label.horizontalAlign = Label.HorizontalAlign.LEFT;
+    label.verticalAlign = Label.VerticalAlign.TOP;
+    label.overflow = Label.Overflow.NONE;
+    label.color = new Color(120, 255, 140, 255);
+    label.string = '';
+    this.hudLabel = label;
+
+    // Camera game chỉ nhìn DEFAULT -> không vẽ trùng HUD.
+    if (this.gameCamera !== null) this.gameCamera.visibility = Layers.Enum.DEFAULT;
+  }
+
+  /** Làm mới 4 lần/giây — quét cả pool mỗi frame là phí, và mắt cũng không đọc kịp nhanh hơn. */
+  private tickHud(dt: number): void {
+    if (this.hudLabel === null) this.buildHud();
+    if (this.hudLabel === null) return;
+    this.hudTimer += dt;
+    if (this.hudTimer < 0.25) return;
+    this.hudTimer = 0;
+
+    const pool = this.solver.pool;
+    const n = pool.count;
+    let sumSpeed = 0;
+    let moving = 0;
+    let inBelt = 0;
+    const beltTop = RIG_LAYOUT.rigPositionY + this.rig.sdf.beltTopY * RIG_LAYOUT.geomScale;
+    const beltBot = RIG_LAYOUT.rigPositionY - this.rig.sdf.beltTopY * RIG_LAYOUT.geomScale;
+    const beltHalfX = this.rig.sdf.beltHalfX * RIG_LAYOUT.geomScale;
+    for (let i = 0; i < n; i++) {
+      const vx = pool.velocities[i * 2], vy = pool.velocities[i * 2 + 1];
+      const sp = Math.sqrt(vx * vx + vy * vy);
+      sumSpeed += sp;
+      if (sp > 0.5) moving++;
+      const px = pool.positions[i * 2], py = pool.positions[i * 2 + 1];
+      if (Math.abs(px) <= beltHalfX && py <= beltTop && py >= beltBot) inBelt++;
+    }
+    const pct = (a: number, b: number): string => (b > 0 ? String(Math.round((100 * a) / b)) : '0');
+    this.hudLabel.string =
+      `song ${n}  |  emit ${this.emittedTotal}  drop ${this.emitDroppedCount}
+` +
+      `lo hut ${this.harvestedTotal}  |  roi khoi rig ${this.killedTotal}  |  respawn ${this.lastRespawned}
+` +
+      `tren belt ${inBelt}  |  dang chay ${moving} (${pct(moving, n)}%)  |  v tb ${(n > 0 ? sumSpeed / n : 0).toFixed(2)}
+` +
+      `jar cleared ${this.jarColumns?.clearedCount ?? 0}  |  t ${(this.runner?.secondsElapsed ?? 0).toFixed(1)}s`;
   }
 
   private simStep(): void {
     this.front.tick(SIM_DT);
     this.syncOccupancy();
+
+    // Đo bằng CHÊNH LỆCH pool.count quanh từng cửa: trong 1 step chỉ có ĐÚNG 2 chỗ gọi pool.removeAt —
+    // killBelowY (cuối solver.step) và harvestJar (trong harvest). Nên hiệu số quy được về đúng 1 nguyên nhân.
+    const nBeforeStep = this.solver.pool.count;
     this.lastRespawned = this.solver.step(this.solverParams);
+    this.killedTotal += nBeforeStep - this.solver.pool.count;
+
+    const nBeforeHarvest = this.solver.pool.count;
     this.jarColumns?.harvest(this.solver.pool);
+    this.harvestedTotal += nBeforeHarvest - this.solver.pool.count;
   }
 
   /**
