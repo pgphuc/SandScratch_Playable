@@ -18,7 +18,8 @@
 // ~18.2 world -> hở ~50% cho hạt chạy vòng. Phân luồng vẫn do bộ lọc màu, và belt chạy vòng nên hạt màu C sớm
 // muộn cũng đi qua hộp của cột C.
 //
-// · Cung bay visual của hạt (JarGrainVisual, parabol SandJump) KHÔNG port: nó là VFX, không đổi số đếm.
+// · Cung bay visual của hạt (JarGrainVisual, parabol SandJump): PORT RỒI — game/JarFlyVisual.ts. Nó là VFX
+//   thuần, không đổi số đếm; JarColumns chỉ báo ra qua callback `onHarvested` của harvest().
 
 import { Node, Vec3, tween } from 'cc';
 import type { MouthBounds } from '../solver/counting';
@@ -112,8 +113,17 @@ export class JarColumns {
     return n;
   }
 
-  harvest(pool: GrainParticlePool): void {
-    for (const c of this.columns) c.harvest(pool);
+  /**
+   * `onHarvested` (tuỳ chọn) = móc cho tầng VFX: gọi 1 lần mỗi lọ THỰC SỰ hút được hạt lượt này.
+   * Cố ý truyền `jar` chứ không truyền toạ độ: đích cung bay là chỗ ĐỨNG của lọ, mà chỗ đó đang tween khi
+   * cột dồn -> đọc worldPosition tại thời điểm bắn mới đúng.
+   */
+  harvest(pool: GrainParticlePool, onHarvested?: (jar: ColorJar, got: number) => void): void {
+    for (const c of this.columns) {
+      const jar = c.head;
+      const got = c.harvest(pool);
+      if (got > 0 && jar !== null) onHarvested?.(jar, got);
+    }
   }
 
   tickVisual(dt: number): void {

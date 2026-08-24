@@ -42,6 +42,8 @@ import { ColorJar } from './ColorJar';
 import { JarColumns, type JarColumnSpec } from './JarColumns';
 import { HandHint } from './HandHint';
 import { attachQuad } from './QuadVisual';
+import { buildRigVisual } from './RigVisual';
+import { JarFlyVisual } from './JarFlyVisual';
 import { ScenarioRunner, type ScenarioJson } from './ScenarioRunner';
 import type { NetworkId } from './NetworkAdapter';
 
@@ -99,9 +101,11 @@ const JAR_MOUTH_W = 2.3;
 const JAR_MOUTH_H = 3;
 
 /** z từng lớp — tranh phải Ở SAU hạt, nếu không pass transparent của tranh vẽ đè lên hạt opaque. */
+const Z_RIG = -0.2;        // rig ở SAU tranh: cát + tranh phải nằm trên khung
 const Z_PICTURE = -0.05;
 const Z_GRAIN = 0;
 const Z_JAR = 0.2;
+const Z_JAR_FLY = 0.25;    // cung bay phải nằm TRƯỚC thân lọ, nếu không hạt chui vào sau lọ ở cuối cung
 const Z_HINT = 1;
 const Z_CTA = 1;
 
@@ -130,6 +134,13 @@ export class AdRoot extends Component {
   @property({ tooltip: 'Solver cát: A = port trung thực (chuẩn parity) · B = cellular automaton (rẻ, tune riêng)' })
   solverMode: string = 'A';
 
+  /**
+   * Hình khối STAND-IN của rig (khung/phễu/vành) vẽ thẳng từ SDF. Bật để nhìn thấy chỗ cát bị chặn khi chưa
+   * có art PNG thật (prefab GameBoard chưa extract). TẮT khi đã ráp art thật.
+   */
+  @property({ tooltip: 'Vẽ hình khối stand-in của rig từ SDF (khung/phễu/vành). Tắt khi đã có art PNG thật.' })
+  showRigStandIn = true;
+
   // --- state ---
   private level!: LoadedLevel;
   private map!: PictureMap;
@@ -141,6 +152,7 @@ export class AdRoot extends Component {
   private renderer: SandGrainRenderer | null = null;
   private runner: ScenarioRunner | null = null;
   private jarColumns: JarColumns | null = null;
+  private jarFly: JarFlyVisual | null = null;
   private gameCamera: Camera | null = null;
   /** Art nut CTA (assets/resources/ui/cta-button.png). null = chua co art -> ve placeholder mau. */
   private ctaTex: Texture2D | null = null;
@@ -267,6 +279,7 @@ export class AdRoot extends Component {
     this.front = new ConversionFront(model, this.host, backend, makeConversionFrontConfig());
     this.front.begin();
 
+    if (this.showRigStandIn) buildRigVisual(this.node, this.rig, Z_RIG);
     this.buildPicture(pictureMat);
     this.buildGrainRenderer(grainMat, cap);
     this.buildJars();
@@ -376,6 +389,7 @@ export class AdRoot extends Component {
     }
 
     this.jarColumns = new JarColumns(specs);
+    this.jarFly = new JarFlyVisual(this.node, Z_JAR_FLY);
   }
 
   private setupScenario(asset: TextAsset): void {
@@ -647,6 +661,7 @@ export class AdRoot extends Component {
     // Render + hình tranh + dồn cột lọ: 1 lần/FRAME.
     this.tex.update(dt);
     this.jarColumns?.tickVisual(dt);
+    this.jarFly?.tick(dt);
     if (this.renderer !== null) this.renderer.syncFromPool(this.solver.pool);
     if (this.debugHud) this.tickHud(dt);
   }
@@ -845,7 +860,11 @@ export class AdRoot extends Component {
     this.killedTotal += nBeforeStep - this.solver.pool.count;
 
     const nBeforeHarvest = this.solver.pool.count;
-    this.jarColumns?.harvest(this.solver.pool);
+    this.jarColumns?.harvest(this.solver.pool, (jar) => {
+      // lastHarvested CHỈ hợp lệ ngay sau harvest của chính lọ đó -> đọc trong callback, không gom lại sau.
+      this.jarFly?.spawnFrom(jar.lastHarvested, jar.node.worldPosition,
+                             hexToColor(hexOfColorName(jar.colorName)));
+    });
     this.harvestedTotal += nBeforeHarvest - this.solver.pool.count;
   }
 
