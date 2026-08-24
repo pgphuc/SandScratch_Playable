@@ -43,11 +43,11 @@ export interface CcdParams {
 const _span: Span = { begin: 0, end: 0 };
 
 /**
- * Quét CCD cho [0..count). Chỉ ĐỌC posPrev/velocities/radii/asleep, chỉ GHI positions (và `diag` nếu truyền).
+ * Quét CCD cho [0..count). Chỉ ĐỌC posPrev/velocities/radii, chỉ GHI positions (và `diag` nếu truyền).
  * `grid` + `cellStart` + `entryIdx` = kết quả buildNeighborGrid của CHÍNH step này.
  */
 export function grainGrainCcd(positions: Float32Array, posPrev: Float32Array, velocities: Float32Array,
-                              radii: Float32Array, asleep: Uint8Array, count: number,
+                              radii: Float32Array, count: number,
                               grid: GrainCellGrid, cellStart: Int32Array, entryIdx: Int32Array,
                               p: CcdParams, diag?: Uint8Array): void {
   const dt = p.dt;
@@ -56,7 +56,6 @@ export function grainGrainCcd(positions: Float32Array, posPrev: Float32Array, ve
 
   for (let i = 0; i < count; i++) {
     if (diag) diag[i] = CCD_DIAG_EARLY_OUT;     // ghi TRƯỚC mọi early-out
-    if (asleep[i] !== 0) continue;              // hạt ngủ không dịch -> khỏi sweep
     const i2 = i * 2;
     const ax = posPrev[i2], ay = posPrev[i2 + 1];
     const bx = positions[i2], by = positions[i2 + 1];

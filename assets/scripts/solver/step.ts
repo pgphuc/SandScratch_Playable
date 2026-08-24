@@ -3,7 +3,7 @@
 //   [J-1 dilate · J0 buildOccNormals]  (chỉ khi occupancy ĐỔI — xem refreshOccupancy)
 //   copyPos -> J1 integrate -> J2 buildNeighborGrid -> J2.5 ccd
 //     -> [J3a accumulate -> J3b apply] × iterations
-//     -> copyAsleep/copyVel -> posFriction -> J4 finalize -> escapeGuard -> killBelowY
+//     -> copyVel -> posFriction -> J4 finalize -> escapeGuard -> killBelowY
 //
 // File này KHÔNG có toán mới: nó chỉ nối các khối đã port và giữ THỨ TỰ + GATE của nguồn. Mọi chỗ "chỉ chạy khi
 // knob>0" đều là gate của nguồn (tắt = mảng liên quan không bị đọc, và hành vi rút về bản trước feature đó).
@@ -19,7 +19,7 @@ import { integrate, escapeGuard, type IntegrateParams } from './integrate';
 import { grainGrainCcd, type CcdParams } from './ccd';
 import { buildOccNormals, dilateOccupancy, type GrainOccupancyField } from './occupancy';
 import {
-  contactAccumulate, contactApply, posFriction, finalize, copyAsleep, copyPos, copyVel,
+  contactAccumulate, contactApply, posFriction, finalize, copyPos, copyVel,
   type AccumulateParams, type ApplyParams, type FinalizeBuffers, type FinalizeParams, type PosFrictionParams,
 } from './contact';
 
@@ -44,7 +44,6 @@ export class SandSolver {
   private posPredicted!: Float32Array;
   private posPrev!: Float32Array;
   private velSnap!: Float32Array;
-  private asleepSnapshot!: Uint8Array;
   private frictionDelta!: Float32Array;
   private delta!: Float32Array;
   private finBuf!: FinalizeBuffers;
@@ -58,17 +57,13 @@ export class SandSolver {
     this.posPredicted = new Float32Array(capacity * 2);
     this.posPrev = new Float32Array(capacity * 2);
     this.velSnap = new Float32Array(capacity * 2);
-    this.asleepSnapshot = new Uint8Array(capacity);
     this.frictionDelta = new Float32Array(capacity * 2);
     this.delta = new Float32Array(capacity * 2);
     this.finBuf = {
       posPredicted: this.posPredicted,
       velSnap: this.velSnap,
-      asleepSnapshot: this.asleepSnapshot,
       frictionDelta: this.frictionDelta,
-      quadFrames: new Int32Array(0),   // thay bằng view của pool ngay dưới
     };
-    this.finBuf.quadFrames = this.pool.quadFrames;
   }
 
   /**
@@ -83,40 +78,37 @@ export class SandSolver {
     const needPosPrev = p.ccd.ccdGate > 0 || p.posFriction.frictionPosMu > 0;
     if (needPosPrev) copyPos(pool.positions, this.posPrev, n);
 
-    integrate(pool.positions, pool.velocities, this.posPredicted, pool.asleep, pool.ghost, pool.ghostReleaseY,
+    integrate(pool.positions, pool.velocities, this.posPredicted, pool.ghost, pool.ghostReleaseY,
               n, p.integrate);
 
     // Lưới build TRÊN pos SAU integrate — mọi consumer neighbor dưới đây dùng CHUNG nó.
     this.cellGrid = buildNeighborGrid(this.grid, pool.positions, n, p.cellSize, p.subdiv);
 
     if (p.ccd.ccdGate > 0) {
-      grainGrainCcd(pool.positions, this.posPrev, pool.velocities, pool.radii, pool.asleep, n,
+      grainGrainCcd(pool.positions, this.posPrev, pool.velocities, pool.radii, n,
                     this.cellGrid, this.grid.cellStart, this.grid.entryIdx, p.ccd);
     }
 
     for (let k = 0; k < p.iterations; k++) {
-      contactAccumulate(pool.positions, pool.velocities, pool.radii, pool.asleep, this.delta, n,
+      contactAccumulate(pool.positions, pool.velocities, pool.radii, this.delta, n,
                         this.cellGrid, this.grid.cellStart, this.grid.entryIdx, p.accumulate);
-      contactApply(pool.positions, this.delta, pool.asleep, pool.ghost, n, p.apply);
+      contactApply(pool.positions, this.delta, pool.ghost, n, p.apply);
     }
 
-    if (p.finalize.frictionVelocity > 0) {
-      copyAsleep(pool.asleep, this.asleepSnapshot, n);
-      copyVel(pool.velocities, pool.asleep, this.velSnap, n);
-    }
+    if (p.finalize.frictionVelocity > 0) copyVel(pool.velocities, this.velSnap, n);
     if (p.posFriction.frictionPosMu > 0) {
-      posFriction(pool.positions, this.posPrev, this.posPredicted, pool.radii, pool.asleep, this.frictionDelta, n,
+      posFriction(pool.positions, this.posPrev, this.posPredicted, pool.radii, this.frictionDelta, n,
                   this.cellGrid, this.grid.cellStart, this.grid.entryIdx, p.posFriction);
     }
 
-    finalize(pool.positions, pool.velocities, pool.radii, pool.asleep, pool.ghost, n,
+    finalize(pool.positions, pool.velocities, pool.radii, pool.ghost, n,
              this.cellGrid, this.grid.cellStart, this.grid.entryIdx, this.finBuf, p.finalize);
 
     // escapeGuard chạy TRƯỚC killBelowY -> hạt lọt đáy được tái tuần hoàn thay vì bị kill (đổi vai killBelowY:
     // giờ chỉ còn là backstop cho hạt SDF-off / runaway).
     let respawned = 0;
     if (p.hasSdf !== 0) {
-      respawned = escapeGuard(pool.positions, pool.velocities, pool.asleep, n, p.integrate.sdf);
+      respawned = escapeGuard(pool.positions, pool.velocities, n, p.integrate.sdf);
     }
     if (Number.isFinite(p.killBelowY)) pool.killBelowY(p.killBelowY);
     return respawned;

@@ -525,17 +525,11 @@ export class AdRoot extends Component {
         hasOcc: 1, occ: this.occ,
         occSnapshot: this.occDilated, occSnapshotRaw: this.occRaw, occNormals: this.occNormals,
         occSlip: SAND_TUNING.grainOccupancySlip,
-        // gapBeltTopY phải TRÙNG integrate (integrate.ts:172 vs contact.ts:468 dùng chung công thức trần vortex).
-        // Hiện chỉ nuôi `inConveyor` = cửa quyết định NGỦ, mà sleep đã tắt cứng -> đường chết; vẫn để đúng để
-        // bật lại sleep không kéo theo bug lệch vùng.
-        hasSdf: 1, sdf, gapBeltTopY: this.rig.sdf.beltTopY,
-        // SLEEP TẮT CỨNG (user chốt 2026-08-24: bên Unity sleep chỉ để test, luôn tắt — ir/tuning.json cũng ghi
-        // grainSleepEnabled = false). Không đọc SAND_TUNING nữa để không ai bật nhầm qua tuning.
-        // Toán tiếp xúc không đổi: mọi chỗ rẽ nhánh theo asleep (share 1 vs ½) rơi hết về nhánh "thức".
-        // Code sleep trong solver/ giờ là CODE CHẾT — xoá được, chưa xoá vì đó là diff riêng cần review riêng.
-        sleepEnabled: 0,
-        quadrantSleep: 0,
-        sleepDelaySteps: 1,
+        // SLEEP ĐÃ GỠ KHỎI SOLVER (2026-08-24). Nguồn Unity luôn tắt sleep (ir/tuning.json: grainSleepEnabled =
+        // false) nên asleep[] vĩnh viễn toàn 0 -> mọi nhánh theo nó là code chết, đã xoá cả chuỗi (asleep/quadFrames
+        // /copyAsleep/inConveyor/countNeighbors + FinalizeParams.gapBeltTopY). Toán tiếp xúc KHÔNG đổi: share 1-vs-½
+        // rơi hết về ½. Bật lại sleep = revert commit này, không phải bật cờ.
+        hasSdf: 1, sdf,
         uniformRadius: SAND_TUNING.grainParticleRadius,
       },
     };

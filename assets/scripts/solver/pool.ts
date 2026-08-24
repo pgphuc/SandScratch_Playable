@@ -12,8 +12,6 @@ export class GrainParticlePool {
   radii!: Float32Array;
   colorIds!: Int32Array;
   carried!: Int32Array;       // số pixel gốc gom vào hạt (jar capacity)
-  asleep!: Uint8Array;        // 1 = ngủ (skip solver)
-  quadFrames!: Int32Array;    // đếm hysteresis quadrant-sleep
   ghost!: Uint8Array;         // booster: đang xuyên tranh
   ghostReleaseY!: Float32Array;
   directJar!: Uint8Array;     // booster: rút khỏi pool bay thẳng vào lọ
@@ -35,8 +33,6 @@ export class GrainParticlePool {
     this.radii = new Float32Array(cap);
     this.colorIds = new Int32Array(cap);
     this.carried = new Int32Array(cap);
-    this.asleep = new Uint8Array(cap);
-    this.quadFrames = new Int32Array(cap);
     this.ghost = new Uint8Array(cap);
     this.ghostReleaseY = new Float32Array(cap);
     this.directJar = new Uint8Array(cap);
@@ -56,8 +52,6 @@ export class GrainParticlePool {
     this.radii[i] = radius;
     this.colorIds[i] = colorId;
     this.carried[i] = carried;
-    this.asleep[i] = 0;          // hạt mới LUÔN thức
-    this.quadFrames[i] = 0;
     this.ghost[i] = ghost ? 1 : 0;
     this.ghostReleaseY[i] = ghostReleaseY;
     this.directJar[i] = directJar ? 1 : 0;
@@ -77,8 +71,6 @@ export class GrainParticlePool {
       this.radii[i] = this.radii[last];
       this.colorIds[i] = this.colorIds[last];
       this.carried[i] = this.carried[last];
-      this.asleep[i] = this.asleep[last];
-      this.quadFrames[i] = this.quadFrames[last];
       this.ghost[i] = this.ghost[last];
       this.ghostReleaseY[i] = this.ghostReleaseY[last];
       this.directJar[i] = this.directJar[last];
@@ -103,13 +95,4 @@ export class GrainParticlePool {
   }
 
   killAll(): void { this._count = 0; }
-
-  /** Đánh thức TẤT CẢ hạt — gọi THEO SỰ KIỆN (belt-full mở), không mỗi frame. */
-  wakeAll(): void {
-    if (!this._created) return;
-    for (let i = 0; i < this._count; i++) {
-      this.asleep[i] = 0;
-      this.quadFrames[i] = 0;
-    }
-  }
 }

@@ -247,24 +247,19 @@ function resolveContainment(pos: V2, vel: V2, sdt: number, pPrev: V2, p: Integra
 }
 
 /**
- * 1 step integrate cho [0..count). SoA: positions/velocities/posPredicted stride 2; asleep/ghost là Uint8Array.
+ * 1 step integrate cho [0..count). SoA: positions/velocities/posPredicted stride 2; ghost là Uint8Array.
  *
  * Hạt NGỦ: KHÔNG integrate, nhưng PHẢI ghi posPredicted=pos để finalize suy corr=0 (không thì corr = pos -
  * posPredicted_cũ = rác). Vẫn vào lưới neighbor làm VẬT CẢN cho hạt thức.
  */
 export function integrate(positions: Float32Array, velocities: Float32Array, posPredicted: Float32Array,
-                          asleep: Uint8Array, ghost: Uint8Array, ghostReleaseY: Float32Array,
+                          ghost: Uint8Array, ghostReleaseY: Float32Array,
                           count: number, p: IntegrateParams): void {
   const steps = Math.max(1, p.substeps);
   const sdt = p.dt / steps;
 
   for (let i = 0; i < count; i++) {
     const i2 = i * 2;
-    if (asleep[i] !== 0) {
-      posPredicted[i2] = positions[i2];
-      posPredicted[i2 + 1] = positions[i2 + 1];
-      continue;
-    }
     _p.x = positions[i2]; _p.y = positions[i2 + 1];
     _v.x = velocities[i2]; _v.y = velocities[i2 + 1];
     let ghosting = ghost[i] !== 0;        // (Booster blast) đang xuyên tranh -> bỏ occupancy trong vòng substep
@@ -411,11 +406,10 @@ class XorShift32 {
  * `bandCounts` (tuỳ chọn, độ dài BAND_COUNT) = đếm theo băng cho diag; chỉ băng FRAME mới LÀ Bug 1-F2.
  * Trả về số hạt bị giật về.
  */
-export function escapeGuard(positions: Float32Array, velocities: Float32Array, asleep: Uint8Array,
+export function escapeGuard(positions: Float32Array, velocities: Float32Array,
                             count: number, sdf: GrainSdfField, bandCounts?: Int32Array): number {
   let respawned = 0;
   for (let i = 0; i < count; i++) {
-    if (asleep[i] !== 0) continue;              // hạt ngủ = đã lắng trong rig, không thể tunneling
     const i2 = i * 2;
     const px = positions[i2], py = positions[i2 + 1];
     const finite = Number.isFinite(px) && Number.isFinite(py);

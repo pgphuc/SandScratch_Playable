@@ -2,7 +2,7 @@
 //
 // Contact hạt-hạt: PBD/DEM Jacobi để cát XẾP ĐỐNG. Chuỗi 1 step (nguồn giữ ĐÚNG 1 Complete()/FixedUpdate):
 //   copyPos -> integrate(J1) -> buildGrid(J2) -> ccd(J2.5) -> [accumulate(J3a) -> apply(J3b)]×K
-//   -> copyAsleep/copyVel -> posFriction -> finalize(J4) -> escapeGuard
+//   -> copyVel -> posFriction -> finalize(J4) -> escapeGuard
 //
 // Model HYBRID DEM: GIỮ velocity tường minh + SDF + belt của integrate. Contact = đẩy VỊ TRÍ (Jacobi), rồi finalize
 // HÃM INELASTIC (giết phần vận tốc đâm vào đống) -> cát NẶNG, KHÔNG bật lại. Không cần Verlet/prevPos.
@@ -24,23 +24,15 @@
 //   · friction tầng VỊ TRÍ mà KHÔNG ghi ngược vào v: kéo p mà v không biết = DÂY CHUN, càng khoẻ càng rung;
 //   · proxy tải `corrN` (cộng dồn dN qua K vòng): cùng bẫy "cộng vector tự khử" — μ gấp 3 mà hành vi y nguyên.
 
-import { clampWorld, clampWorldGrid, normalizeSafe, xformPoint,
+import { clampWorld, clampWorldGrid,
          type GrainSdfField, type GrainWallGrid, type V2 } from './sdfWalls';
-import { rowSpan, TALLY_SLACK, type GrainCellGrid, type Span } from './neighborGrid';
+import { rowSpan, type GrainCellGrid, type Span } from './neighborGrid';
 import { sweepBlocked, type GrainOccupancyField } from './occupancy';
 
 const _span: Span = { begin: 0, end: 0 };
 const _p: V2 = { x: 0, y: 0 };
 const _v: V2 = { x: 0, y: 0 };
 const _pPrev: V2 = { x: 0, y: 0 };
-const _lp: V2 = { x: 0, y: 0 };
-const _g: V2 = { x: 0, y: 0 };
-
-/** 'ở cạnh' = distance < (ri+rj)·slack. CÙNG hằng với lưới (nó quyết ringSlack lúc build) — lệch = phủ THIẾU im lặng. */
-const NEIGHBOR_SLACK = TALLY_SLACK;
-
-/** Đủ neighbor ở cả 4 quadrant. */
-const FULL_QUAD_MASK = 0xf;
 
 /** Băm 2 int -> uint (Unity math.hash(int2)) — chỉ dùng cho hướng tách cặp TRÙNG TÂM, không dùng làm khoá ô. */
 function hashInt2(a: number, b: number): number {
@@ -67,7 +59,7 @@ export interface AccumulateParams {
  * ⚠ Test chồng lấn Ở ĐÂY mỗi iter, KHÔNG cache theo cặp: tập chồng lấn đổi giữa các iter (pos dịch mỗi iter).
  */
 export function contactAccumulate(positions: Float32Array, velocities: Float32Array, radii: Float32Array,
-                                  asleep: Uint8Array, delta: Float32Array, count: number,
+                                  delta: Float32Array, count: number,
                                   grid: GrainCellGrid, cellStart: Int32Array, entryIdx: Int32Array,
                                   p: AccumulateParams): void {
   const ring = grid.ring;
@@ -75,9 +67,6 @@ export function contactAccumulate(positions: Float32Array, velocities: Float32Ar
 
   for (let i = 0; i < count; i++) {
     const i2 = i * 2;
-    // Hạt ngủ: bỏ query neighbor (chi phí LỚN nhất pipeline) — delta=0 -> apply không dịch nó.
-    if (asleep[i] !== 0) { delta[i2] = 0; delta[i2 + 1] = 0; continue; }
-
     const pix = positions[i2], piy = positions[i2 + 1];
     const ri = radii[i];
     let dNx = 0, dNy = 0;      // tổng đẩy PHÁP TUYẾN vòng này
@@ -113,14 +102,12 @@ export function contactAccumulate(positions: Float32Array, velocities: Float32Ar
           dirY = i < j ? dpy : -dpy;
           pen = rsum;                                 // tách 1 đường kính (maxPush clamp overshoot)
         }
-        // Neighbor j NGỦ = tường (nó KHÔNG tự đẩy nửa của mình vì đã early-out) -> i nhận FULL pen, không half.
-        const sleepJ = asleep[j] !== 0;
-        let share = sleepJ ? 1 : 0.5;
+        let share = 0.5;
         // (INTRUDER-BIAS) j THỨC: chia pen theo AI ĐANG ĐỘNG thay vì 50/50 cứng. Hạt rơi đâm vào đụn thì 50/50 đẩy
         // ĐỤN ra đúng bằng lượng đẩy hạt lên => đụn NỞ SANG 2 BÊN, hạt chen vào giữa. TỔNG 2 bên = 1 LUÔN LUÔN
         // (lượt j tính đúng phần bù) => Jacobi vẫn đối xứng, KHÔNG bơm năng lượng — chỉ CHIA LẠI pen, không cộng xung.
         // Dòng chảy đều (belt, cột cát cùng rơi): spdI≈spdJ => 0.5 => hành vi y nguyên.
-        if (p.intruderBias > 0 && !sleepJ) {
+        if (p.intruderBias > 0) {
           const denom = spdI + Math.hypot(velocities[j2], velocities[j2 + 1]);
           const ratio = denom > 1e-6 ? spdI / denom : 0.5;   // cả 2 gần đứng yên -> giữ 50/50
           share = 0.5 + p.intruderBias * (ratio - 0.5);
@@ -177,10 +164,9 @@ export interface ApplyParams {
  * POSITION-ONLY: v scratch + slip=0 -> chỉ chặn vị trí, KHÔNG nhiễu velocity-feedback (finalize lo hãm inelastic 1
  * lần trên corr tổng).
  */
-export function contactApply(positions: Float32Array, delta: Float32Array, asleep: Uint8Array, ghost: Uint8Array,
+export function contactApply(positions: Float32Array, delta: Float32Array, ghost: Uint8Array,
                              count: number, p: ApplyParams): void {
   for (let i = 0; i < count; i++) {
-    if (asleep[i] !== 0) continue;                 // không dịch hạt ngủ
     const i2 = i * 2;
     _pPrev.x = positions[i2];                      // occupancy-clean (sweep iter trước / integrate per-substep)
     _pPrev.y = positions[i2 + 1];
@@ -214,22 +200,9 @@ export function copyPos(positions: Float32Array, snapshot: Float32Array, count: 
   for (let i = 0; i < count * 2; i++) snapshot[i] = positions[i];
 }
 
-/** Snapshot asleep TRƯỚC finalize — frictionPair đọc trạng thái ngủ ĐẦU frame (share ½ vs 1). */
-export function copyAsleep(asleep: Uint8Array, snapshot: Uint8Array, count: number): void {
-  for (let i = 0; i < count; i++) snapshot[i] = asleep[i];
-}
-
-/**
- * Snapshot velocities TRƯỚC finalize. Hạt NGỦ snapshot = 0: đống tĩnh — vật lý nó đứng yên, v lưu trong pool là dư âm
- * lúc thiếp đi => hạt thức tựa đống ngủ trượt so với ĐẤT => ma sát TĨNH ăn.
- */
-export function copyVel(velocities: Float32Array, asleep: Uint8Array, snapshot: Float32Array, count: number): void {
-  for (let i = 0; i < count; i++) {
-    const i2 = i * 2;
-    const z = asleep[i] !== 0;
-    snapshot[i2] = z ? 0 : velocities[i2];
-    snapshot[i2 + 1] = z ? 0 : velocities[i2 + 1];
-  }
+/** Snapshot velocities TRƯỚC finalize — mốc vận tốc ĐẦU frame cho friction per-pair. */
+export function copyVel(velocities: Float32Array, snapshot: Float32Array, count: number): void {
+  for (let i = 0; i < count * 2; i++) snapshot[i] = velocities[i];
 }
 
 // --- posFriction (friction Coulomb per-pair tầng VỊ TRÍ) --------------------------------------------------------------
@@ -249,7 +222,7 @@ export interface PosFrictionParams {
  * pen≈0).
  */
 export function posFriction(positions: Float32Array, posPrev: Float32Array, posPredicted: Float32Array,
-                            radii: Float32Array, asleep: Uint8Array, frictionDelta: Float32Array, count: number,
+                            radii: Float32Array, frictionDelta: Float32Array, count: number,
                             grid: GrainCellGrid, cellStart: Int32Array, entryIdx: Int32Array,
                             p: PosFrictionParams): void {
   const ring = grid.ring;
@@ -257,10 +230,6 @@ export function posFriction(positions: Float32Array, posPrev: Float32Array, posP
 
   for (let i = 0; i < count; i++) {
     const i2 = i * 2;
-    if (asleep[i] !== 0) {                     // hạt ngủ không tự kéo (vẫn là ĐẤT cho neighbor thức qua share)
-      frictionDelta[i2] = 0; frictionDelta[i2 + 1] = 0;
-      continue;
-    }
     const pix = posPredicted[i2], piy = posPredicted[i2 + 1];
     const ri = radii[i];
     let impX = 0, impY = 0;
@@ -283,7 +252,7 @@ export function posFriction(positions: Float32Array, posPrev: Float32Array, posP
         const dist = Math.sqrt(dist2);
         const nx = diffX / dist, ny = diffY / dist;
         const pen = rsum - dist;
-        // Δ = dịch chuyển tương đối frame này (j ngủ không dịch nên vế j tự = 0).
+        // Δ = dịch chuyển tương đối frame này.
         const dxAll = moveIx - (positions[j2] - posPrev[j2]);
         const dyAll = moveIy - (positions[j2 + 1] - posPrev[j2 + 1]);
         const dn = dxAll * nx + dyAll * ny;
@@ -291,8 +260,7 @@ export function posFriction(positions: Float32Array, posPrev: Float32Array, posP
         const dTy = dyAll - dn * ny;
         const lT = Math.sqrt(dTx * dTx + dTy * dTy);
         if (lT <= 1e-6) continue;               // không trượt tương đối -> ma sát 0
-        // share: với ĐẤT (j ngủ) phải FULL, không thì v* = g_t·dt trượt vĩnh viễn.
-        const share = asleep[j] !== 0 ? 1 : 0.5;
+        const share = 0.5;
         // Hạt rơi SƯỢT: |Δt| lớn nhưng pen bé -> cap μₚ·pen bé -> gần như không đụng cú rơi (Coulomb tự bảo vệ).
         const mag = Math.min(share * lT, p.frictionPosMu * pen);
         impX += (dTx / lT) * mag;
@@ -336,11 +304,6 @@ export interface FinalizeParams {
 
   hasSdf: number;
   sdf: GrainSdfField;
-  gapBeltTopY: number;
-
-  sleepEnabled: number;
-  quadrantSleep: number;   // 0 = KHÔNG hạt nào ngủ MỚI (killswitch); hạt đang ngủ giữ nguyên
-  sleepDelaySteps: number;
   uniformRadius: number;
 }
 
@@ -348,41 +311,22 @@ export interface FinalizeParams {
 export interface FinalizeBuffers {
   posPredicted: Float32Array;
   velSnap: Float32Array;        // chỉ đọc khi frictionVelocity > 0
-  asleepSnapshot: Uint8Array;   // chỉ đọc khi frictionVelocity > 0
   frictionDelta: Float32Array;  // chỉ đọc khi frictionPos > 0
-  quadFrames: Int32Array;
 }
 
 /**
- * post-contact: occupancy clamp (contact có thể đẩy hạt VÀO tranh) + damp vận tốc INELASTIC + friction + quyết định
- * NGỦ. `corr` = tổng dịch chuyển kể từ posPredicted = hướng contact/occ đẩy hạt RA; GIẾT phần vận tốc ĐÂM VÀO đống
+ * post-contact: occupancy clamp (contact có thể đẩy hạt VÀO tranh) + damp vận tốc INELASTIC + friction.
+ * `corr` = tổng dịch chuyển kể từ posPredicted = hướng contact/occ đẩy hạt RA; GIẾT phần vận tốc ĐÂM VÀO đống
  * theo damping -> cát NẶNG, KHÔNG bật lại (khác cộng rebound corr/dt = nảy tung + văng xuyên tường).
  */
 export function finalize(positions: Float32Array, velocities: Float32Array, radii: Float32Array,
-                         asleep: Uint8Array, ghost: Uint8Array, count: number,
+                         ghost: Uint8Array, count: number,
                          grid: GrainCellGrid, cellStart: Int32Array, entryIdx: Int32Array,
                          buf: FinalizeBuffers, p: FinalizeParams): void {
   const posPredicted = buf.posPredicted;
 
   for (let i = 0; i < count; i++) {
     const i2 = i * 2;
-
-    if (asleep[i] !== 0) {
-      // WAKE = HỤT QUADRANT: hạt ngủ re-check phủ 4 quadrant mỗi frame. Hạt dưới bị drain -> hạt trên hụt quadrant
-      // DƯỚI -> thức -> dây chuyền dưới-lên. Thức từ frame SAU (integrate frame này đã skip nó rồi).
-      if (p.quadrantSleep !== 0) {
-        // (region-gate) lọt vùng belt (cửa mở nâng trần đổi vùng) -> thức vô điều kiện; ngoài belt -> re-check.
-        if (inConveyor(positions[i2], positions[i2 + 1], p)) {
-          asleep[i] = 0;
-          buf.quadFrames[i] = 0;
-        } else if (countNeighbors(i, posPredicted, radii, count, grid, cellStart, entryIdx, p) !== FULL_QUAD_MASK) {
-          asleep[i] = 0;
-          buf.quadFrames[i] = 0;
-        }
-      }
-      continue;   // vẫn ngủ (hoặc vừa thức, đợi frame sau integrate): giữ nguyên pos/vel, không finalize
-    }
-
     _p.x = positions[i2]; _p.y = positions[i2 + 1];
     _v.x = velocities[i2]; _v.y = velocities[i2 + 1];
 
@@ -426,7 +370,7 @@ export function finalize(positions: Float32Array, velocities: Float32Array, radi
     // KHÔNG phải cặp hạt-hạt => layer sát mặt trượt tự do · đỉnh đụn ít contact + pen bé => avalanche · lõi cột pen
     // lớn => trần lớn => khoá. μᵥ ≈ tan góc nghỉ.
     if (p.frictionVelocity > 0) {
-      applyPairFriction(i, _v, posPredicted, radii, buf.velSnap, buf.asleepSnapshot, count,
+      applyPairFriction(i, _v, posPredicted, radii, buf.velSnap, count,
                         grid, cellStart, entryIdx, p);
     }
     // GHI NGƯỢC phần friction vào v — chỉ Δp friction, KHÔNG đụng pháp tuyến (vế corr/dt pháp tuyến đã bác vì nảy
@@ -440,71 +384,7 @@ export function finalize(positions: Float32Array, velocities: Float32Array, radi
     }
     positions[i2] = _p.x; positions[i2 + 1] = _p.y;
     velocities[i2] = _v.x; velocities[i2 + 1] = _v.y;
-
-    // QUYẾT ĐỊNH ngủ: (1) NGOÀI vùng conveyor (belt vortex kéo liên tục, ngủ trong đó = kẹt treo) + (2) phủ đủ 4
-    // quadrant LIÊN TỤC sleepDelaySteps step (hysteresis chống ngủ nhầm hạt giữa dòng chảy dày bị vây TẠM).
-    // Lớp MẶT hụt quadrant TRÊN -> không bao giờ ngủ (CỐ Ý: mặt thoáng phải thức để creep).
-    if (p.sleepEnabled !== 0 && p.quadrantSleep !== 0) {
-      if (inConveyor(_p.x, _p.y, p)) {
-        buf.quadFrames[i] = 0;
-      } else if (countNeighbors(i, posPredicted, radii, count, grid, cellStart, entryIdx, p) !== FULL_QUAD_MASK) {
-        buf.quadFrames[i] = 0;
-      } else {
-        const qf = buf.quadFrames[i] + 1;
-        buf.quadFrames[i] = qf;
-        if (qf >= p.sleepDelaySteps) asleep[i] = 1;
-      }
-    }
   }
-}
-
-/**
- * Hạt world-pos có nằm trong vùng CONVEYOR không — CÙNG bbox belt local với vortex của integrate. Trần hạ xuống
- * gapBeltTopY trong dấu chân miệng phễu |lx|<=wallX khi cửa đóng -> crest lắng dưới cửa vẫn ngủ được.
- */
-function inConveyor(px: number, py: number, p: FinalizeParams): boolean {
-  if (p.hasSdf === 0) return false;
-  xformPoint(p.sdf.worldToLocal, px, py, _lp);
-  const beltTopHere = Math.abs(_lp.x) <= p.sdf.wallX ? p.gapBeltTopY : p.sdf.beltTopY;
-  return Math.abs(_lp.x) <= p.sdf.beltHalfX && _lp.y <= beltTopHere && _lp.y >= -p.sdf.beltTopY;
-}
-
-/**
- * Quét hàng xóm quanh hạt i -> quadMask (bit theo quadrant có neighbor, khung GRAVITY). Đếm MỌI neighbor (thức LẪN
- * ngủ). Dùng posPredicted (== positions lúc build lưới) -> cùng ô + KHÔNG race với positions[i].
- * ⚠ Tally hỏi R = 2r·NEIGHBOR_SLACK chứ không phải 2r => dùng ringSlack, KHÔNG dùng ring.
- */
-function countNeighbors(i: number, posPredicted: Float32Array, radii: Float32Array, count: number,
-                        grid: GrainCellGrid, cellStart: Int32Array, entryIdx: Int32Array,
-                        p: FinalizeParams): number {
-  let quadMask = 0;
-  const i2 = i * 2;
-  const pix = posPredicted[i2], piy = posPredicted[i2 + 1];
-  const ri = radii[i];
-  _g.x = p.gravityX; _g.y = p.gravityY;
-  normalizeSafe(_g);                                // gravity~0 -> gDir=0 -> mask không bao giờ đủ
-  const gDirX = _g.x, gDirY = _g.y;
-  const gPerpX = -gDirY, gPerpY = gDirX;            // trục vuông góc gravity — khung chia quadrant
-  const rr = (ri + p.uniformRadius) * NEIGHBOR_SLACK;
-  const rr2 = rr * rr;
-
-  const ring = grid.ringSlack;
-  const cell = grid.cellSize;
-  const cgx = Math.floor(pix / cell), cgy = Math.floor(piy / cell);
-  for (let dy = -ring; dy <= ring; dy++) {
-    if (!rowSpan(grid, cellStart, cgy + dy, cgx - ring, cgx + ring, _span)) continue;
-    for (let e = _span.begin; e < _span.end; e++) {
-      const j = entryIdx[e];
-      if (j === i) continue;
-      const j2 = j * 2;
-      const djx = posPredicted[j2] - pix;
-      const djy = posPredicted[j2 + 1] - piy;
-      if (djx * djx + djy * djy >= rr2) continue;   // ngoài tầm 'cạnh'
-      // Tie đúng-trục (dot==0, measure-zero trong sim thật) rơi về phía 'không >0'.
-      quadMask |= 1 << (((djx * gDirX + djy * gDirY) > 0 ? 1 : 0) | ((djx * gPerpX + djy * gPerpY) > 0 ? 2 : 0));
-    }
-  }
-  return quadMask;
 }
 
 /**
@@ -517,7 +397,7 @@ function countNeighbors(i: number, posPredicted: Float32Array, radii: Float32Arr
  * under-relaxation => tổng mỗi bên <= term cặp mạnh nhất <= ½|vt_rel|.
  */
 function applyPairFriction(i: number, v: V2, posPredicted: Float32Array, radii: Float32Array,
-                           velSnap: Float32Array, asleepSnapshot: Uint8Array, count: number,
+                           velSnap: Float32Array, count: number,
                            grid: GrainCellGrid, cellStart: Int32Array, entryIdx: Int32Array,
                            p: FinalizeParams): void {
   const i2 = i * 2;
@@ -554,7 +434,7 @@ function applyPairFriction(i: number, v: V2, posPredicted: Float32Array, radii: 
       // j THỨC -> ½ (lượt j tự góp nửa NGƯỢC chiều). j NGỦ -> FULL 1.0: lượt j early-out, nửa kia KHÔNG BAO GIỜ
       // được trừ. ⛔ Để ½ với ĐẤT = điểm cân bằng v* = g_t·dt ≠ 0: hạt mặt dốc trượt VĨNH VIỄN đúng mức
       // gravity/frame, μᵥ không tham gia (nhánh ½|vt| luôn thắng cap) — play-test: đụn dàn phẳng bất kể μᵥ.
-      const share = asleepSnapshot[j] !== 0 ? 1 : 0.5;
+      const share = 0.5;
       const mag = Math.min(share * lvt, p.frictionVelocity * pen / p.dt + p.frictionSurfaceDrag * lvt);
       impX += (vtx / lvt) * mag;
       impY += (vty / lvt) * mag;
