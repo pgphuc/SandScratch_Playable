@@ -15,7 +15,7 @@
 // Renderer đồng bộ 1 lần/FRAME (không phải mỗi step): 2 step trong 1 frame ghi mesh 2 lần cho cùng 1 hình.
 
 import {
-  Asset, Camera, Canvas, Color, Component, EventTouch, Input, Label, Layers, Material, Node, TextAsset,
+  Asset, Camera, Canvas, Color, Component, EventTouch, Input, Label, Layers, Material, Node, Prefab, TextAsset,
   Texture2D, UITransform, Vec3, input, resources, view, _decorator,
 } from 'cc';
 
@@ -42,6 +42,7 @@ import { ColorJar } from './ColorJar';
 import { JarColumns, type JarColumnSpec } from './JarColumns';
 import { HandHint } from './HandHint';
 import { attachQuad } from './QuadVisual';
+import { attachBox, boxTextureName } from './BoxVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
 import { probeStatic } from './StaticProbe';
@@ -153,6 +154,14 @@ export class AdRoot extends Component {
   @property({ tooltip: 'Chu kỳ in log probe (giây)' })
   staticProbePeriod = 2;
 
+  /**
+   * Console của bản preview nằm trong trình duyệt/editor nên phía ngoài KHÔNG đọc được. Đặt URL này thì mỗi lô
+   * log probe được POST thêm sang server `tools/probe-sink.js` để ghi ra file đọc được. Rỗng = chỉ in console.
+   * Lỗi mạng bị NUỐT có chủ ý: không có sink thì ad vẫn phải chạy y nguyên.
+   */
+  @property({ tooltip: 'URL sink nhận log probe (node tools/probe-sink.js). Rỗng = chỉ in console.' })
+  staticProbeSink = 'http://127.0.0.1:7799/';
+
   // --- state ---
   private level!: LoadedLevel;
   private map!: PictureMap;
@@ -168,6 +177,10 @@ export class AdRoot extends Component {
   private gameCamera: Camera | null = null;
   /** Art nut CTA (assets/resources/ui/cta-button.png). null = chua co art -> ve placeholder mau. */
   private ctaTex: Texture2D | null = null;
+  /** Prefab mesh hộp lọ (assets/resources/box/SKM_Box.fbx). null = chưa nạp được -> quad màu. */
+  private boxPrefab: Prefab | null = null;
+  /** hex HOA 6 ký tự -> atlas màu của hộp. Thiếu màu nào thì hộp màu đó chỉ có mesh trắng. */
+  private readonly boxTex: Record<string, Texture2D> = {};
 
   private solverParams!: SolverParams;
   private occ!: GrainOccupancyField;
@@ -295,6 +308,7 @@ export class AdRoot extends Component {
     if (this.showRigStandIn) buildRigVisual(this.node, this.rig, Z_RIG);
     this.buildPicture(pictureMat);
     this.buildGrainRenderer(grainMat, cap);
+    await this.loadBoxArt();
     this.buildJars();
     this.setupScenario(scenarioTxt);
     this.syncOccupancy();
@@ -361,6 +375,29 @@ export class AdRoot extends Component {
    * Hộp đúng theo nguồn: tâm = tâm HEAD JAR của cột + autoMouthOffset, cỡ = autoMouthSize.
    * Với 4 cột thì 4 hộp phủ 4×2.3 = 9.2 world trên dấu chân belt rộng ~18.2 -> hở ~50% cho hạt chạy vòng.
    */
+  /**
+   * Nạp art hộp lọ: 1 prefab mesh + 1 atlas màu cho MỖI màu lọ level dùng (tên file = hex, xem BoxVisual).
+   * TUỲ CHỌN hết: thiếu file -> null -> buildJars rơi về quad màu như trước, KHÔNG chặn boot vì cái hộp.
+   */
+  private async loadBoxArt(): Promise<void> {
+    const hexes: string[] = [];
+    for (const spec of this.level.jars) {
+      const rgb = hexOfColorName(spec.colorName);
+      if (rgb < 0) continue;
+      const name = boxTextureName(rgb);
+      if (hexes.indexOf(name) < 0) hexes.push(name);
+    }
+    const [prefab, texes] = await Promise.all([
+      loadResOpt('box/SKM_Box', Prefab),
+      Promise.all(hexes.map((h) => loadResOpt(`box/${h}/texture`, Texture2D))),
+    ]);
+    this.boxPrefab = prefab;
+    for (let i = 0; i < hexes.length; i++) {
+      const t = texes[i];
+      if (t !== null) this.boxTex[hexes[i]] = t;
+    }
+  }
+
   private buildJars(): void {
     const jarRoot = new Node('Jars');
     jarRoot.setParent(this.node);
@@ -386,7 +423,12 @@ export class AdRoot extends Component {
       }
       const node = new Node(`Jar_${spec.column}_${spec.slot}_${spec.colorName}`);
       node.setParent(jarRoot);
-      attachQuad(node, JAR_W, JAR_H, hexToColor(hexOfColorName(spec.colorName)), null, false);
+      const rgb = hexOfColorName(spec.colorName);
+      // Mesh hộp thật; thiếu prefab/atlas -> quad màu placeholder như bản trước (không để lọ tàng hình).
+      const boxed = this.boxPrefab !== null
+        && attachBox(node, this.boxPrefab, rgb >= 0 ? this.boxTex[boxTextureName(rgb)] ?? null : null,
+                     JAR_W, JAR_H) !== null;
+      if (!boxed) attachQuad(node, JAR_W, JAR_H, hexToColor(rgb), null, false);
 
       const jar = node.addComponent(ColorJar);
       jar.mouthWidth = JAR_W;
@@ -688,6 +730,17 @@ export class AdRoot extends Component {
     this.probeTimer = 0;
     const lines = probeStatic(this.solver.pool, this.solverParams.integrate);
     for (const l of lines) console.log(l);
+    this.sendProbe(lines);
+  }
+
+  /** Đẩy lô log sang sink (nếu có). Fire-and-forget, mọi lỗi bị nuốt — sink chết không được làm ad chết. */
+  private sendProbe(lines: string[]): void {
+    const url = this.staticProbeSink;
+    if (url === '' || typeof fetch !== 'function') return;
+    const mode = `mode=${this.solverMode.toUpperCase()} t=${(this.runner?.secondsElapsed ?? 0).toFixed(1)}s`;
+    try {
+      void fetch(url, { method: 'POST', body: `--- ${mode}\n${lines.join('\n')}` }).catch(() => { /* im lặng */ });
+    } catch (e) { /* im lặng */ }
   }
 
   // ==================================================================== BELT-FULL: cửa trượt + boost
