@@ -43,7 +43,7 @@ import { JarColumns, type JarColumnSpec } from './JarColumns';
 import { HandHint } from './HandHint';
 import { attachQuad } from './QuadVisual';
 import { attachBox, boxTextureName } from './BoxVisual';
-import { buildBoardVisual, BOARD_LAYERS } from './BoardVisual';
+import { buildBoardVisual, parseBoardLayout, BOARD_DEFAULT, type BoardLayout } from './BoardVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
 import { probeStatic } from './StaticProbe';
@@ -120,6 +120,9 @@ export class AdRoot extends Component {
   @property({ tooltip: 'Đường trong assets/resources tới scenario đã chọn' })
   scenarioResPath = 'data/scenario';
 
+  @property({ tooltip: 'File JSON chỉnh tay vị trí/cỡ art nền + hộp lọ (trong assets/resources)' })
+  boardLayoutResPath = 'data/board-layout';
+
   @property({ tooltip: 'Bán kính brush vuốt, theo Ô CƠ CHẾ' })
   brushRadiusCells = 3;
 
@@ -182,8 +185,12 @@ export class AdRoot extends Component {
   private boxPrefab: Prefab | null = null;
   /** hex HOA 6 ký tự -> atlas màu của hộp. Thiếu màu nào thì hộp màu đó chỉ có mesh trắng. */
   private readonly boxTex: Record<string, Texture2D> = {};
-  /** Số lớp art nền dựng được (BoardVisual). < BOARD_LAYERS.length = có PNG chưa nạp được. */
+  /** Số lớp art nền dựng được (BoardVisual). Ít hơn số lớp trong layout = có PNG chưa nạp được. */
   private boardLayers = 0;
+  /** Layout chỉnh tay được; mặc định = số suy từ prefab Unity. */
+  private layout: BoardLayout = BOARD_DEFAULT;
+  /** Layout đang chạy lấy từ đâu — in ra log boot để biết file chỉnh tay CÓ ĂN hay không. */
+  private layoutSource = 'MAC DINH';
 
   private solverParams!: SolverParams;
   private occ!: GrainOccupancyField;
@@ -311,10 +318,12 @@ export class AdRoot extends Component {
     if (this.showRigStandIn) buildRigVisual(this.node, this.rig, Z_RIG);
     this.buildPicture(pictureMat);
     this.buildGrainRenderer(grainMat, cap);
+    await this.loadLayout();
     await this.loadBoxArt();
     // Art nền dựng TRƯỚC lọ/CTA nhưng z của nó nằm sau tất cả, nên thứ tự dựng không quyết định thứ tự vẽ.
-    const boardTex = await Promise.all(BOARD_LAYERS.map((L) => loadResOpt(`${L.res}/texture`, Texture2D)));
-    this.boardLayers = buildBoardVisual(this.node, boardTex);
+    const layers = this.layout.board;
+    const boardTex = await Promise.all(layers.map((L) => loadResOpt(`${L.res}/texture`, Texture2D)));
+    this.boardLayers = buildBoardVisual(this.node, layers, boardTex);
     this.buildJars();
     this.setupScenario(scenarioTxt);
     this.syncOccupancy();
@@ -330,7 +339,7 @@ export class AdRoot extends Component {
       + `poolCap=${this.solver.pool.capacity} rigStandIn=${this.showRigStandIn}`,
       `[boot] art: boxPrefab=${this.boxPrefab !== null ? 'OK' : 'THIEU'} `
       + `boxTex=[${texKeys.join(',')}] ctaTex=${this.ctaTex !== null ? 'OK' : 'THIEU'} `
-      + `board=${this.boardLayers}/${BOARD_LAYERS.length}`,
+      + `board=${this.boardLayers}/${this.layout.board.length} layout=${this.layoutSource}`,
     ];
     for (const l of lines) console.log(l);
     this.sendProbe(lines);
@@ -397,6 +406,22 @@ export class AdRoot extends Component {
    * Với 4 cột thì 4 hộp phủ 4×2.3 = 9.2 world trên dấu chân belt rộng ~18.2 -> hở ~50% cho hạt chạy vòng.
    */
   /**
+   * Nạp file chỉnh tay layout (assets/resources/data/board-layout.txt). Thiếu/hỏng -> BOARD_DEFAULT, và nói rõ
+   * trong log là đang chạy bằng số mặc định — im lặng ở đây thì người chỉnh tay sửa mãi mà không thấy đổi.
+   */
+  private async loadLayout(): Promise<void> {
+    const asset = await loadResOpt(this.boardLayoutResPath, TextAsset);
+    if (asset === null) { this.layoutSource = 'MAC DINH (khong co file)'; return; }
+    try {
+      this.layout = parseBoardLayout(asset.text);
+      this.layoutSource = this.boardLayoutResPath;
+    } catch (e) {
+      this.layoutSource = `MAC DINH (JSON hong: ${(e as Error).message})`;
+      console.warn(`[AdRoot] ${this.boardLayoutResPath} hỏng JSON — dùng số mặc định.`, e);
+    }
+  }
+
+  /**
    * Nạp art hộp lọ: 1 prefab mesh + 1 atlas màu cho MỖI màu lọ level dùng (tên file = hex, xem BoxVisual).
    * TUỲ CHỌN hết: thiếu file -> null -> buildJars rơi về quad màu như trước, KHÔNG chặn boot vì cái hộp.
    */
@@ -448,7 +473,7 @@ export class AdRoot extends Component {
       // Mesh hộp thật; thiếu prefab/atlas -> quad màu placeholder như bản trước (không để lọ tàng hình).
       const boxed = this.boxPrefab !== null
         && attachBox(node, this.boxPrefab, rgb >= 0 ? this.boxTex[boxTextureName(rgb)] ?? null : null,
-                     JAR_W, JAR_H) !== null;
+                     this.layout.box) !== null;
       if (!boxed) attachQuad(node, JAR_W, JAR_H, hexToColor(rgb), null, false);
 
       const jar = node.addComponent(ColorJar);
