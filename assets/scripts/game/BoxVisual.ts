@@ -14,6 +14,7 @@
 // Material PBR của fbx trong cảnh không đèn sẽ ra đen. `builtin-unlit` tra theo TÊN nên không cần uuid nào.
 
 import { Material, Mesh, MeshRenderer, Node, Prefab, SkinnedMeshRenderer, Texture2D, Vec3, instantiate } from 'cc';
+import type { BoxTuning } from './BoardVisual';
 
 /** Material unlit dùng chung cho mọi hộp — 1 instance/màu do getMaterialInstance tách ra. */
 let unlitBox: Material | null = null;
@@ -49,10 +50,11 @@ const _min = new Vec3();
 const _max = new Vec3();
 
 /**
- * Gắn 1 hộp vào `node`, tô bằng `tex`, co cho vừa khung `w × h` (world) và đặt tâm hộp trùng tâm node.
+ * Gắn 1 hộp vào `node`, tô bằng `tex`, co cho vừa khung `t.w × t.h` (world) và đặt tâm hộp trùng tâm node.
+ * Mọi số hình học lấy từ `t` = khối "box" trong assets/resources/data/board-layout.txt (chỉnh tay được).
  * @returns node hộp vừa tạo, hoặc null nếu prefab không dựng được (caller rơi về quad màu).
  */
-export function attachBox(node: Node, prefab: Prefab, tex: Texture2D | null, w: number, h: number): Node | null {
+export function attachBox(node: Node, prefab: Prefab, tex: Texture2D | null, t: BoxTuning): Node | null {
   const box = instantiate(prefab);
   if (box === null) return null;
   box.name = 'BoxMesh';
@@ -75,14 +77,17 @@ export function attachBox(node: Node, prefab: Prefab, tex: Texture2D | null, w: 
   };
   paint(box);
 
+  // --- xoay TRƯỚC khi đo: mesh gốc dựng cho camera 3D của Unity, xoay xong thì bề ngang/cao mới là cái cần fit ---
+  box.setRotationFromEuler(t.rotX, t.rotY, t.rotZ);
+
   // --- co cho vừa khung lọ: 1 hệ số ĐỀU cho cả 3 trục, không bóp méo hộp ---
   if (localBounds(box, _min, _max)) {
     const bw = _max.x - _min.x, bh = _max.y - _min.y;
     if (bw > 1e-6 && bh > 1e-6) {
-      const s = Math.min(w / bw, h / bh);
+      const s = Math.min(t.w / bw, t.h / bh) * (t.scale > 0 ? t.scale : 1);
       box.setScale(s, s, s);
       // Tâm AABB thường KHÔNG ở gốc mesh (hộp dựng đứng từ mặt đáy) -> kéo về cho tâm trùng tâm node.
-      box.setPosition(-(_min.x + _max.x) * 0.5 * s, -(_min.y + _max.y) * 0.5 * s, 0);
+      box.setPosition(-(_min.x + _max.x) * 0.5 * s + t.dx, -(_min.y + _max.y) * 0.5 * s + t.dy, 0);
     }
   }
   return box;
