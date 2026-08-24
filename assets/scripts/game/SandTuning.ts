@@ -48,7 +48,9 @@ export const SAND_TUNING = {
   // --- belt (bang chuyen) — nguon ir/tuning.json configs.5.data, KHONG nhan geomScale ---
   // velocity giu WORLD suot vong integrate (integrate.ts dong 118) va tangent da doi sang world roi normalize,
   // nen beltSpeed la world/s; ca canh song dung he toa do Unity -> so IR truyen thang.
-  // Bo *BoostRate KHONG port: chung thuoc booster, manifest P2 da DROP toan bo SandFlow/Booster/.
+  // ⚠ DINH CHINH 2026-08-24: ghi chu cu "*BoostRate thuoc booster, da DROP" la SAI. GrainFlowBackend.cs:674
+  // `boostOn = _beltFull || pictureCleared` -> day la BOOST LUC BELT DAY (va luc tranh da tan het), khong dinh
+  // dang gi toi SandFlow/Booster/. Da port day du o duoi.
   grainBeltSpeed: 13,
   grainBeltCoupling: 40,
   grainBeltOneWay: true,
@@ -62,6 +64,25 @@ export const SAND_TUNING = {
   grainBeltUpTopRelease: 1,
   grainBeltUpTopReleaseStart: 0,
   grainBeltUpTopTangentDamp: 0,
+
+  // --- belt-full: 6 he so BOOST + nguong hysteresis + cua truot ---
+  // GrainFlowBackend.cs:684-689 nhan cac he so nay vao 6 knob belt tuong ung khi boostOn.
+  grainBeltSpeedBoostRate: 2.5,
+  grainBeltCouplingBoostRate: 1,
+  grainBeltRadialDampingBoostRate: 2.5,
+  grainBeltUpSpeedBoostRate: 1,
+  grainBeltUpCouplingBoostRate: 2.5,
+  grainBeltUpRadialDampingBoostRate: 2.5,
+  /** VAO belt-full khi fill >= 1.0 (fill = so hat trong vanh / CONVEYOR_CAPACITY.maxGrains). */
+  grainBeltFullEntry: 1,
+  /** RA belt-full khi fill <= 0.98 — hysteresis chong bat/tat phap phu. */
+  grainBeltFullExit: 0.980000019073486,
+  grainBeltFullTimeoutSeconds: 10,
+  grainBeltFullPreLostSeconds: 5,
+  /** Toc truot cua SDF, don vi DO-DONG/GIAY. 2 -> 0.5s di het hanh trinh. */
+  grainGateWallSpeed: 2,
+  /** Keo cua len/xuong so voi y = rOut (geometry-local). */
+  grainGateWallYOffset: 0.035000000149011,
 
   // --- ccd + neighbor grid ---
   grainGrainCcdGate: 2,
@@ -138,6 +159,17 @@ export const CONVEYOR_SHAPE = {
   bodyLength: 1.1299999952316284,
   channelWidth: 0.25,
   innerHoleRadius: 0.03500000014901161,
+  /**
+   * SUC CHUA BELT theo SO HAT — nguon: cung asset ConveyorShape, field `maxGrainsManual`.
+   * GrainFlowBackend.cs:311 `_maxGrains = max(1, ConveyorShape.MaxGrainsManual)` — LUON doc field nay, khong
+   * phu thuoc `conveyorCapacityMode` (AutoFillRatio chi anh huong duong pixel/grid, khong phai duong grain).
+   *
+   * ⚠ SO NAY LA TRAN THAT CUA VANH. Do headless 2026-08-24: van chuyen lanh manh toi ~1200 hat (vx ~ -6.5),
+   * suy tu ~1600, CHET HAN tu ~2400 tro len (vx ~ 0, chi khuay tai cho). Khop dung con so nguon.
+   * Truoc khi noi belt-full gate, ad de throttle 6000 hat = 2.5x tran nay -> vanh nghet cung -> "bang chuyen
+   * dung im" ma user bao 2026-08-24.
+   */
+  maxGrains: 2400,
 } as const;
 
 /**

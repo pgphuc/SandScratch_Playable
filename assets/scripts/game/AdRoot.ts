@@ -21,11 +21,13 @@ import {
 
 import { SandSolver, refreshOccupancy, type SolverParams } from '../solver/step';
 import { ConversionFront, type SandEmitRequest, type SandFlowBackend } from '../solver/conversionFront';
-import { mouthFromCenterSize } from '../solver/counting';
+import {
+  BeltFullGate, countBeltGrains, fillRatio, isInBeltLocal, mouthFromCenterSize, type BeltRegion,
+} from '../solver/counting';
 import type { GrainOccupancyField } from '../solver/occupancy';
 
 import {
-  SAND_TUNING, RIG_LAYOUT, PICTURE_PIXEL_WORLD, makeConversionFrontConfig, grainPoolCapacity,
+  SAND_TUNING, RIG_LAYOUT, CONVEYOR_SHAPE, PICTURE_PIXEL_WORLD, makeConversionFrontConfig, grainPoolCapacity,
 } from './SandTuning';
 import { buildSdfRig, type SdfRig } from './SdfBuild';
 import { loadLevel, buildCarveModel, colorIdOfJarName, type LoadedLevel } from './LevelLoad';
@@ -162,6 +164,19 @@ export class AdRoot extends Component {
   private hudLabel: Label | null = null;
   private hudTimer = 0;
 
+  // ---- belt-full gate + cửa trượt SDF (xem §BELT-FULL bên dưới) ----
+  private beltGate: BeltFullGate | null = null;
+  private beltRegion: BeltRegion | null = null;
+  /** ĐỘ ĐÓNG cửa: 0 = mở hẳn, 1 = đóng kín khe entry. */
+  private doorOpenness = 0;
+  private doorTarget = 0;
+  private doorDesired = 0;
+  /** 1 segment [ax, ay, bx, by] LOCAL — cấp 1 lần, ghi đè mỗi step. */
+  private readonly doorSeg = new Float32Array(4);
+  private beltFull = false;
+  /** Số hạt đang trong vành ở step gần nhất — HUD + P6 đọc. */
+  private beltGrainCount = 0;
+
   // ==================================================================== khởi tạo
 
   onLoad(): void {
@@ -234,6 +249,7 @@ export class AdRoot extends Component {
     this.occNormals = new Float32Array(occCells * 2);
 
     this.solverParams = this.makeSolverParams();
+    this.setupBeltGate();
 
     // --- conversion front ---
     const backend: SandFlowBackend = {
@@ -632,6 +648,95 @@ export class AdRoot extends Component {
     if (this.debugHud) this.tickHud(dt);
   }
 
+  // ==================================================================== BELT-FULL: cửa trượt + boost
+
+  /**
+   * SỨC CHỨA BĂNG CHUYỀN — cái thiếu này là thủ phạm "cát trên belt không chạy CCW" (user báo 2026-08-24).
+   *
+   * Nguồn cấp cho vành một TRẦN CỨNG `ConveyorShape.maxGrainsManual = 2400` hạt. Chạm trần -> `MaxGrainGate`
+   * bật belt-full -> (a) cửa SDF TRƯỢT ĐÓNG khe entry đỉnh ring (cát dồn ứ lại trong phễu, không vào thêm)
+   * + (b) BOOST 6 knob belt để dọn nhanh chỗ đang có. Tụt dưới `exit` thì mở lại.
+   *
+   * Bản port trước bỏ CẢ HAI vế, trong khi throttle pool để 6000 hạt = 2.5× trần vành. Kết quả đo headless
+   * (scratchpad/belt/dense2.js): vx trung bình trên belt -6.5 ở 1200 hạt -> -1.8 ở 2000 -> ≈ 0 từ 2400 trở lên.
+   * Tức là vành chặt cứng rồi cát chỉ khuấy tại chỗ, đúng triệu chứng user tả.
+   *
+   * KHÔNG nối `onLose`: đây là đường THUA của game gốc, còn kịch bản ad luôn force-win + fallback 30s -> CTA.
+   * `pictureCleared` (vế thứ 2 của boostOn bên nguồn) CHƯA nối — ConversionFront chưa phát tín hiệu "tranh tan hết".
+   */
+  private setupBeltGate(): void {
+    this.beltRegion = {
+      worldToLocal: this.rig.sdf.worldToLocal,
+      beltHalfX: this.rig.sdf.beltHalfX,
+      beltTopY: this.rig.sdf.beltTopY,
+    };
+    const gate = new BeltFullGate({
+      entry: SAND_TUNING.grainBeltFullEntry,
+      exit: SAND_TUNING.grainBeltFullExit,
+      timeoutSeconds: SAND_TUNING.grainBeltFullTimeoutSeconds,
+      preLostSeconds: SAND_TUNING.grainBeltFullPreLostSeconds,
+    });
+    gate.onBeltFullChanged = (full: boolean): void => {
+      this.beltFull = full;
+      this.doorDesired = full ? 1 : 0;    // ĐẶT CHỖ đích; NO-REVERSAL commit trong tickBeltGate
+    };
+    gate.begin();
+    this.beltGate = gate;
+  }
+
+  /** MoveTowards của Unity: tiến về `target` tối đa `maxDelta`, không vọt qua. */
+  private static moveTowards(cur: number, target: number, maxDelta: number): number {
+    const d = target - cur;
+    if (Math.abs(d) <= maxDelta) return target;
+    return cur + Math.sign(d) * maxDelta;
+  }
+
+  /**
+   * 1 nhịp gate — chạy TRƯỚC solver.step để cửa + hệ số boost của step này là bản tươi.
+   * Nguồn: GrainFlowBackend.cs §"s2 cửa SDF" (555-576) + §boost (674-689).
+   */
+  private tickBeltGate(dt: number): void {
+    const gate = this.beltGate;
+    if (gate === null) return;
+    const sdf = this.rig.sdf;
+
+    this.beltGrainCount = countBeltGrains(this.solver.pool, this.beltRegion);
+    gate.tick(fillRatio(this.beltGrainCount, CONVEYOR_SHAPE.maxGrains), dt);
+
+    // NO-REVERSAL (nguồn chốt): cửa đang trượt dở KHÔNG quay đầu giữa chừng — đích mới chờ ở doorDesired, chỉ
+    // commit khi đã đi hết hành trình. Trễ tối đa 1 hành trình = 1/rate giây.
+    if (this.doorOpenness === this.doorTarget) this.doorTarget = this.doorDesired;
+    const rate = SAND_TUNING.grainGateWallSpeed > 0 ? SAND_TUNING.grainGateWallSpeed : 1;
+    this.doorOpenness = AdRoot.moveTowards(this.doorOpenness, this.doorTarget, rate * dt);
+
+    // Cửa MỞ HẲN -> KHÔNG feed segment. Nguồn ghi rõ vì sao: openness=0 đẩy mép cửa về -3·gapHalf, đoạn đó
+    // chặn nhầm vùng tự do trên-trái ring.
+    const has = this.doorOpenness > 1e-3 ? 1 : 0;
+    if (has !== 0) {
+      const xL = -sdf.gapHalf - 2 * sdf.gapHalf * (1 - this.doorOpenness);
+      const doorY = sdf.rOut + SAND_TUNING.grainGateWallYOffset;
+      this.doorSeg[0] = xL;
+      this.doorSeg[1] = doorY;
+      this.doorSeg[2] = xL + 2 * sdf.gapHalf;
+      this.doorSeg[3] = doorY;
+    }
+    const ip = this.solverParams.integrate;
+    ip.hasDoor = has;
+    ip.door = this.doorSeg;
+    this.solverParams.apply.hasDoor = has;
+    this.solverParams.apply.door = this.doorSeg;
+
+    // BOOST 6 knob khi belt đầy. Nhân từ số NỀN của SAND_TUNING mỗi lần, không nhân dồn lên giá trị cũ.
+    const on = this.beltFull;
+    const mul = (base: number, rateMul: number): number => (on ? base * Math.max(0, rateMul) : base);
+    ip.beltSpeed = mul(SAND_TUNING.grainBeltSpeed, SAND_TUNING.grainBeltSpeedBoostRate);
+    ip.beltCoupling = mul(SAND_TUNING.grainBeltCoupling, SAND_TUNING.grainBeltCouplingBoostRate);
+    ip.beltRadialDamping = mul(SAND_TUNING.grainBeltRadialDamping, SAND_TUNING.grainBeltRadialDampingBoostRate);
+    ip.beltSpeedUp = mul(SAND_TUNING.grainBeltUpSpeed, SAND_TUNING.grainBeltUpSpeedBoostRate);
+    ip.beltCouplingUp = mul(SAND_TUNING.grainBeltUpCoupling, SAND_TUNING.grainBeltUpCouplingBoostRate);
+    ip.beltRadialDampingUp = mul(SAND_TUNING.grainBeltUpRadialDamping, SAND_TUNING.grainBeltUpRadialDampingBoostRate);
+  }
+
   // ==================================================================== HUD debug
 
   /**
@@ -694,25 +799,33 @@ export class AdRoot extends Component {
     const n = pool.count;
     let sumSpeed = 0;
     let moving = 0;
+    // vx TRUNG BÌNH CÓ DẤU của hạt trong vành = TẢI THẬT của băng chuyền. |v| không dùng được: cát khuấy tại
+    // chỗ lúc nghẹt vẫn cho |v| lớn, chỉ vx có dấu mới phân biệt "chạy vòng" với "rung tại chỗ".
+    let beltVx = 0;
     let inBelt = 0;
-    const beltTop = RIG_LAYOUT.rigPositionY + this.rig.sdf.beltTopY * RIG_LAYOUT.geomScale;
-    const beltBot = RIG_LAYOUT.rigPositionY - this.rig.sdf.beltTopY * RIG_LAYOUT.geomScale;
-    const beltHalfX = this.rig.sdf.beltHalfX * RIG_LAYOUT.geomScale;
+    const region = this.beltRegion;
     for (let i = 0; i < n; i++) {
       const vx = pool.velocities[i * 2], vy = pool.velocities[i * 2 + 1];
       const sp = Math.sqrt(vx * vx + vy * vy);
       sumSpeed += sp;
       if (sp > 0.5) moving++;
-      const px = pool.positions[i * 2], py = pool.positions[i * 2 + 1];
-      if (Math.abs(px) <= beltHalfX && py <= beltTop && py >= beltBot) inBelt++;
+      if (region !== null && isInBeltLocal(region, pool.positions[i * 2], pool.positions[i * 2 + 1])) {
+        inBelt++;
+        beltVx += vx;
+      }
     }
     const pct = (a: number, b: number): string => (b > 0 ? String(Math.round((100 * a) / b)) : '0');
+    const fill = fillRatio(inBelt, CONVEYOR_SHAPE.maxGrains);
     this.hudLabel.string =
       `song ${n}  |  emit ${this.emittedTotal}  drop ${this.emitDroppedCount}
 ` +
       `lo hut ${this.harvestedTotal}  |  roi khoi rig ${this.killedTotal}  |  respawn ${this.lastRespawned}
 ` +
-      `tren belt ${inBelt}  |  dang chay ${moving} (${pct(moving, n)}%)  |  v tb ${(n > 0 ? sumSpeed / n : 0).toFixed(2)}
+      `BELT ${inBelt}/${CONVEYOR_SHAPE.maxGrains} (fill ${(fill * 100).toFixed(0)}%)  vx tb ${(inBelt > 0 ? beltVx / inBelt : 0).toFixed(2)}
+` +
+      `cua ${(this.doorOpenness * 100).toFixed(0)}% dong${this.beltFull ? '  [BELT FULL - boost]' : ''}
+` +
+      `dang chay ${moving} (${pct(moving, n)}%)  |  |v| tb ${(n > 0 ? sumSpeed / n : 0).toFixed(2)}
 ` +
       `jar cleared ${this.jarColumns?.clearedCount ?? 0}  |  t ${(this.runner?.secondsElapsed ?? 0).toFixed(1)}s`;
   }
@@ -720,6 +833,7 @@ export class AdRoot extends Component {
   private simStep(): void {
     this.front.tick(SIM_DT);
     this.syncOccupancy();
+    this.tickBeltGate(SIM_DT);
 
     // Đo bằng CHÊNH LỆCH pool.count quanh từng cửa: trong 1 step chỉ có ĐÚNG 2 chỗ gọi pool.removeAt —
     // killBelowY (cuối solver.step) và harvestJar (trong harvest). Nên hiệu số quy được về đúng 1 nguyên nhân.
