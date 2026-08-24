@@ -1,0 +1,36 @@
+{
+  "_doc": [
+    "CHO PHEP CHINH TAY vi tri/co art nen + hop lo. Sua so o day roi RELOAD PREVIEW la thay ngay,",
+    "khong phai sua code, khong phai mo lai editor.",
+    "",
+    "board[]: moi lop la 1 anh PNG trong assets/resources/board/.",
+    "  res = duong dan resources (khong duoi)   x,y = TAM anh theo world   w,h = be ngang/cao world",
+    "  z   = lop ve. Nho hon = XA hon. Moc dang dung: tranh -0.05, hat 0, lo 0.2 -> art nen phai < -0.05.",
+    "  Bo 1 lop = xoa dong do (hoac doi res thanh chuoi rong).",
+    "",
+    "box: hop lo (mesh SKM_Box). w,h = khung cho hop chui vua (giu ti le, khong bop meo).",
+    "  dx,dy = day hop lech so voi tam lo   rotX/rotY/rotZ = xoay (do)   scale = nhan them sau khi fit.",
+    "",
+    "SO MAC DINH lay tu Unity, khong dat tay: GameBoard.prefab (root scale 1.15, LevelSpawner dat tai",
+    "0.025,17) + PPU 100 trong .meta. Doi chung: khungbangchuyen ra tam (0.025, 3.34) rong 18.45 trong khi",
+    "vanh bang chuyen dung tu SDF nam o (0, 3.2) rong ~18.2."
+  ],
+
+  "board": [
+    { "res": "board/bg_ipad",         "x":  0.025, "y": 12.400, "w": 34.500, "h": 37.157, "z": -1.20 },
+    { "res": "board/Artboard",        "x":  0.025, "y": 17.000, "w": 24.840, "h": 49.680, "z": -1.00 },
+    { "res": "board/khungbangchuyen", "x":  0.025, "y":  3.338, "w": 18.446, "h":  6.820, "z": -0.90 },
+    { "res": "board/Bangchuyen2",     "x": -0.044, "y":  3.154, "w": 13.340, "h":  2.220, "z": -0.85 }
+  ],
+
+  "box": {
+    "w": 3.6,
+    "h": 2.6,
+    "dx": 0,
+    "dy": 0,
+    "rotX": 0,
+    "rotY": 0,
+    "rotZ": 0,
+    "scale": 1
+  }
+}
