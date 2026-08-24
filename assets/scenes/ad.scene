@@ -54,7 +54,7 @@
     "_globals": {
       "__id__": 5
     },
-    "_id": "ad-scene-root"
+    "_id": "a5758297-879f-4ec3-9f1e-ca47ceb0d2a4"
   },
   {
     "__type__": "cc.Node",
@@ -105,7 +105,7 @@
     "_id": "ad-node-root"
   },
   {
-    "__type__": "AdRoot",
+    "__type__": "0e1a9rgMJhF3pOe6rIIqxll",
     "_name": "",
     "_objFlags": 0,
     "__editorExtras__": {},
@@ -121,7 +121,7 @@
     "_id": "ad-comp-adroot"
   },
   {
-    "__type__": "ScenarioRunner",
+    "__type__": "7933b7/S/xF54hmvUlhe8BI",
     "_name": "",
     "_objFlags": 0,
     "__editorExtras__": {},
