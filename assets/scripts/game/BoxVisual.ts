@@ -80,14 +80,19 @@ export function attachBox(node: Node, prefab: Prefab, tex: Texture2D | null, t: 
   // --- xoay TRƯỚC khi đo: mesh gốc dựng cho camera 3D của Unity, xoay xong thì bề ngang/cao mới là cái cần fit ---
   box.setRotationFromEuler(t.rotX, t.rotY, t.rotZ);
 
-  // --- co cho vừa khung lọ: 1 hệ số ĐỀU cho cả 3 trục, không bóp méo hộp ---
+  // --- co cho vừa khung lọ: 1 hệ số ĐỀU cho X/Y, không bóp méo mặt hộp ---
   if (localBounds(box, _min, _max)) {
     const bw = _max.x - _min.x, bh = _max.y - _min.y;
     if (bw > 1e-6 && bh > 1e-6) {
       const s = Math.min(t.w / bw, t.h / bh) * (t.scale > 0 ? t.scale : 1);
-      box.setScale(s, s, s);
-      // Tâm AABB thường KHÔNG ở gốc mesh (hộp dựng đứng từ mặt đáy) -> kéo về cho tâm trùng tâm node.
-      box.setPosition(-(_min.x + _max.x) * 0.5 * s + t.dx, -(_min.y + _max.y) * 0.5 * s + t.dy, 0);
+      const sz = s * (t.zScale > 0 ? t.zScale : 1);
+      box.setScale(s, s, sz);
+      // MẶT TRƯỚC hộp ghim đúng z của node, phần dày còn lại đổ về PHÍA SAU.
+      //
+      // Vì sao không để tâm hộp trùng z node như X/Y: đây là mesh 3D có bề dày, đặt tâm ở z node thì nửa trước
+      // thò lên trước ~1 world — vượt cả Z_CTA (1.0) nên hộp che mất nút CTA (bug user báo 2026-08-24). Lớp z
+      // của ad là mặt phẳng 2D xếp chồng, nên vật 3D phải tự khai "mặt trước tôi ở đâu" chứ không dày ra 2 phía.
+      box.setPosition(-(_min.x + _max.x) * 0.5 * s + t.dx, -(_min.y + _max.y) * 0.5 * s + t.dy, -_max.z * sz);
     }
   }
   return box;

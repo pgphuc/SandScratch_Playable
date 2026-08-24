@@ -10,6 +10,8 @@
     "",
     "box: hop lo (mesh SKM_Box). w,h = khung cho hop chui vua (giu ti le, khong bop meo).",
     "  dx,dy = day hop lech so voi tam lo   rotX/rotY/rotZ = xoay (do)   scale = nhan them sau khi fit.",
+    "  zScale = be day hop. MAT TRUOC hop luon ghim dung z cua lo (0.2), phan day do ve PHIA SAU -> hop",
+    "    khong bao gio tho len truoc nut CTA (z=1). Giam zScale = hop det lai.",
     "",
     "SO MAC DINH lay tu Unity, khong dat tay: GameBoard.prefab (root scale 1.15, LevelSpawner dat tai",
     "0.025,17) + PPU 100 trong .meta. Doi chung: khungbangchuyen ra tam (0.025, 3.34) rong 18.45 trong khi",
@@ -31,6 +33,7 @@
     "rotX": 0,
     "rotY": 0,
     "rotZ": 0,
-    "scale": 1
+    "scale": 1,
+    "zScale": 1
   }
 }

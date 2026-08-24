@@ -44,6 +44,7 @@ export interface BoxTuning {
   dx: number; dy: number;
   rotX: number; rotY: number; rotZ: number;
   scale: number;
+  zScale: number;
 }
 
 export interface BoardLayout {
@@ -59,7 +60,7 @@ export const BOARD_DEFAULT: BoardLayout = {
     { res: 'board/khungbangchuyen', x: 0.025, y: 3.338, w: 18.446, h: 6.82, z: -0.9 },
     { res: 'board/Bangchuyen2', x: -0.044, y: 3.154, w: 13.34, h: 2.22, z: -0.85 },
   ],
-  box: { w: 3.6, h: 2.6, dx: 0, dy: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1 },
+  box: { w: 3.6, h: 2.6, dx: 0, dy: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1, zScale: 1 },
 };
 
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && isFinite(v) ? v : fallback);
@@ -87,7 +88,7 @@ export function parseBoardLayout(text: string): BoardLayout {
       w: num(box.w, d.box.w), h: num(box.h, d.box.h),
       dx: num(box.dx, d.box.dx), dy: num(box.dy, d.box.dy),
       rotX: num(box.rotX, d.box.rotX), rotY: num(box.rotY, d.box.rotY), rotZ: num(box.rotZ, d.box.rotZ),
-      scale: num(box.scale, d.box.scale),
+      scale: num(box.scale, d.box.scale), zScale: num(box.zScale, d.box.zScale),
     },
   };
 }
