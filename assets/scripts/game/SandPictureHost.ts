@@ -190,6 +190,37 @@ export class SandPictureHost implements PictureHost {
     return carved;
   }
 
+  /**
+   * (MỐC RÌA ĐÓNG TÚI — port `PictureColliderBuilder.BrushFootprintFullyLive`) Dấu chân brush tại ô (px,py)
+   * bán kính `radius` có còn nằm TRỌN trên vùng "sống" của túi đang mở không — sống = trong biên tranh VÀ
+   * (ô của CHÍNH túi này HOẶC còn Solid). false ngay khi MỘT ô rìa ló ra ngoài tranh / là Empty / là Held của
+   * túi KHÁC (đã convert).
+   *
+   * Lượng từ là ∀ chứ không phải ∃, và đó là điểm mấu chốt: ∃ ("còn chạm vệt túi") = mốc TÂM, giữ túi mở tới
+   * khi ngón rời hẳn vệt; ∀ = mốc RÌA, đóng NGAY khi rìa vừa chạm biên. Nguồn ĐẢO từ ∃ sang ∀ ngày 2026-08-04
+   * và ghi rõ mốc RÌA đồng thời chữa bug "vuốt nhanh -> tách túi": mốc TÂM hỏi đúng 1 ô, vuốt nhanh thì ô đó
+   * có thể tình cờ không thuộc túi -> false GIẢ -> đóng túi giữa nét oan.
+   *
+   * ⚠ Ô BĂNG tính là SỐNG (nguồn ghi rõ): băng nằm nguyên Solid, coi nó là biên túi thì mọi nét quét ngang cụm
+   * băng sẽ đóng túi vụn.
+   */
+  brushFootprintFullyLive(px: number, py: number, radius: number): boolean {
+    const b = this.openBatch;
+    if (b === null) return false;
+    const w = this.model.width, h = this.model.height;
+    const r = radius > 0 ? radius : 0;
+    const r2 = r * r;
+    for (let oy = -r; oy <= r; oy++)
+      for (let ox = -r; ox <= r; ox++) {
+        if (ox * ox + oy * oy > r2) continue;                          // đĩa tròn — khớp carveBrush
+        const cx = px + ox, cy = py + oy;
+        if (cx < 0 || cy < 0 || cx >= w || cy >= h) return false;      // rìa ra NGOÀI tranh -> biên túi
+        if (b.contains(cy * w + cx)) continue;                         // ô của chính túi này -> sống
+        if (this.model.stateAt(cx, cy) !== PictureCellState.Solid) return false; // Empty/Held túi khác -> biên
+      }
+    return true;
+  }
+
   /** Nhấc ngón -> đóng túi, xếp vào hàng chờ kênh Swipe. */
   closeStroke(): void {
     const b = this.openBatch;

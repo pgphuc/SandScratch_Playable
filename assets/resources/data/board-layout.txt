@@ -28,6 +28,13 @@
     "  closedWhenWaiting = lo CHUA toi luot dung o pose nap DONG (frame cuoi clip Close, khong phat clip)",
     "  speed        = nhan toc do phat. Nghia 4 clip suy ra tu TEN, chua soi mat -> nhin sai thi TAT o day.",
     "",
+    "fill: MUC CAT dang trong hop + KHOI khi nhan cat (port SmokeEffect.cs, giỏ recode nen la XAP XI).",
+    "  w,h    = co mat cat (world)      dx,dy = cho mat cat luc DAY 0%, so voi tam lo",
+    "  dz     = nhich ra TRUOC mat hop (qua nho = z-fight voi panel hop)",
+    "  range  = quang mat cat dang khi 0% -> 100%. Nguon fillRange=2 nhung o he local prefab khac -> chinh mat.",
+    "  smoke* = khoi: smokeEvery (giay giua 2 lan ban) · smokeCount (puff/lan) · smokeSize · smokeLife ·",
+    "           smokeRise (toc do bay len) · smokeSpread (tan ngang). smoke=false = tat rieng khoi, van co muc cat.",
+    "",
     "SO MAC DINH lay tu Unity, khong dat tay: GameBoard.prefab (root scale 1.15, LevelSpawner dat tai",
     "0.025,17) + PPU 100 trong .meta. Doi chung: khungbangchuyen ra tam (0.025, 3.34) rong 18.45 trong khi",
     "vanh bang chuyen dung tu SDF nam o (0, 3.2) rong ~18.2."
@@ -61,5 +68,22 @@
     "closeOnFull": true,
     "idleBetween": true,
     "closedWhenWaiting": true
+  },
+
+  "fill": {
+    "enabled": true,
+    "w": 2.4,
+    "h": 0.42,
+    "dx": 0,
+    "dy": -0.95,
+    "dz": 0.06,
+    "range": 1.7,
+    "smoke": true,
+    "smokeEvery": 0.18,
+    "smokeCount": 2,
+    "smokeSize": 0.55,
+    "smokeLife": 0.55,
+    "smokeRise": 1.6,
+    "smokeSpread": 0.8
   }
 }

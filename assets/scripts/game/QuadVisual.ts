@@ -36,6 +36,31 @@ function quadMesh(w: number, h: number): Mesh {
   return utils.MeshUtils.createMesh(geom);
 }
 
+/** Mesh cầu bán kính 0.5 dùng chung — caller scale node để ra cỡ mong muốn. */
+let sphere05: Mesh | null = null;
+
+/**
+ * Gắn 1 hình CẦU đường kính `d` (world) vào `node`, tô `color` phẳng (unlit).
+ *
+ * Dùng cho hạt visual bay vào lọ: nguồn `JarGrainVisual.cs` cho prefab là "1 GO + Renderer — SpriteRenderer
+ * HOẶC MeshRenderer sphere", và dặn thẳng "mesh sphere phải dùng material UNLIT để màu PHẲNG như cát (material
+ * lit bị ánh sáng scene làm lệch màu)" — đúng cảnh này: unlit + ortho + không đèn.
+ *
+ * segments = 8: hạt bay to cỡ 0.4 world trong 0.38s, thêm mặt chỉ tốn vertex chứ mắt không đọc ra.
+ */
+export function attachSphere(node: Node, d: number, color: Color): MeshRenderer {
+  if (sphere05 === null) sphere05 = utils.MeshUtils.createMesh(primitives.sphere(0.5, { segments: 8 }));
+  const mr = node.getComponent(MeshRenderer) ?? node.addComponent(MeshRenderer)!;
+  mr.mesh = sphere05;
+  mr.shadowCastingMode = MeshRenderer.ShadowCastingMode.OFF;
+  mr.receiveShadow = MeshRenderer.ShadowReceivingMode.OFF;
+  // OPAQUE: hạt cát đục, và pass opaque ghi depth nên hạt che nhau đúng mà không phải sort.
+  mr.material = baseMaterial(false);
+  mr.getMaterialInstance(0)?.setProperty('mainColor', color);
+  node.setScale(d, d, d);
+  return mr;
+}
+
 /**
  * Gắn 1 quad `w × h` (world) vào `node`, tô `color`. `texture` != null -> nhân thêm texture.
  * Trả về MeshRenderer để caller đổi màu/texture sau.

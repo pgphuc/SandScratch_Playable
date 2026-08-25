@@ -3,7 +3,9 @@
 // VÌ SAO CẦN: hộp hút nằm ở RÃNH ĐÁY BELT chứ không ở chỗ đứng của lọ (ObiJarSink, autoMouthOffset (0,5,0)).
 // Không có cung bay thì hạt chạm rãnh đáy là BIẾN MẤT tại chỗ — đo 2026-08-24 xác nhận phép cộng
 // emit = lọ hút + sống khớp CHÍNH XÁC, tức không mất hạt nào; mắt thấy "bốc hơi" thuần tuý vì thiếu lớp này.
-// Nguồn Unity: JarGrainVisual + parabol SandJump.
+// Nguồn Unity: JarGrainVisual + parabol SandJump. Hạt là MESH CẦU unlit (không phải quad) — đúng nhánh
+// "MeshRenderer sphere" mà JarGrainVisual.cs mô tả cho prefab, và comment nguồn dặn material phải UNLIT để màu
+// phẳng như cát. Đổi từ quad sang cầu 2026-08-25 theo yêu cầu user ("hạt vào lọ là prefab 3D").
 //
 // KHÔNG ĐỘNG VÀO SỐ ĐẾM: lớp này chỉ đọc `ColorJar.lastHarvested` (đã có sẵn, ColorJar.ts:118) rồi vẽ.
 // Hạt đã bị pool.removeAt từ trước — đây thuần tuý là trang trí, xoá đi thì số liệu QC không đổi.
@@ -13,14 +15,14 @@
 // vào lọ vì mắt đọc DÒNG chứ không đếm hạt.
 
 import { Color, MeshRenderer, Node, Vec3 } from 'cc';
-import { attachQuad } from './QuadVisual';
+import { attachSphere } from './QuadVisual';
 import type { HarvestedGrain } from '../solver/counting';
 
 /** Thời gian bay 1 cung. Ngắn hơn thì đọc thành "hút", dài hơn thì cát lững lờ không giống bị hút. */
 const FLIGHT_SEC = 0.38;
 /** Độ vồng parabol theo tỉ lệ quãng ngang — 0 = bay thẳng. */
 const ARC_HEIGHT = 0.45;
-/** Cỡ 1 hạt visual (world). Nhỉnh hơn hạt sim để nhìn thấy khi bay nhanh. */
+/** Đường kính 1 hạt visual (world). Nhỉnh hơn hạt sim để nhìn thấy khi bay nhanh. */
 const FLY_SIZE = 0.42;
 
 interface Flyer {
@@ -50,7 +52,7 @@ export class JarFlyVisual {
       const n = new Node(`fly_${i}`);
       n.setParent(this.root);
       n.active = false;
-      this.renderers.push(attachQuad(n, FLY_SIZE, FLY_SIZE, new Color(255, 255, 255, 255), null, true));
+      this.renderers.push(attachSphere(n, FLY_SIZE, new Color(255, 255, 255, 255)));
       this.flyers.push({ node: n, fromX: 0, fromY: 0, toX: 0, toY: 0, arc: 0, t: -1 });
     }
   }

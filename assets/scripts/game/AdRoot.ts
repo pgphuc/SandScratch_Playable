@@ -44,6 +44,7 @@ import { HandHint } from './HandHint';
 import { attachQuad } from './QuadVisual';
 import { attachBox, boxTextureName, lastBoxFit } from './BoxVisual';
 import { BoxAnim } from './BoxAnim';
+import { JarFillVisual } from './JarFillVisual';
 import { buildBoardVisual, parseBoardLayout, BOARD_DEFAULT, type BoardLayout } from './BoardVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
@@ -79,7 +80,17 @@ const CAM_CENTER_Y = 13;
 // đứng của lọ KHÔNG có nguồn Unity, số ở đây là ĐẶT TAY" là SAI. Số đặt tay cũ ([-6.9,-2.3,2.3,6.9] /
 // [-2.2,-5.4,-8.6]) tình cờ khá sát, nhưng từ đây dùng số nguồn.
 //
-// Trục Z của nguồn (jarZStep = -2: lọ lùi dần về sau) BỎ — ad này phẳng 2D, chỉ giữ trục Y.
+// ============ TRỤC Z CỦA CỘT LỌ (ĐÍNH CHÍNH 2026-08-25) ============
+// Bản P4a BỎ trục z với lý do "ad này phẳng 2D". Đúng khi lọ còn là quad màu; SAI từ lúc lọ thành mesh SKM_Box
+// dày ~2.3 world: không lệch z thì hộp slot trên đâm xuyên và đè lên MẶT TRƯỚC hộp slot dưới (user báo).
+//
+// ⚠ ĐẢO DẤU khi bê sang: camera Unity nhìn +Z nên z NHỎ = GẦN camera; nguồn có headLocalYZ.z = 0,
+// secondLocalYZ.z = -2, jarZStep = -2 => lọ càng DƯỚI càng z nhỏ = càng GẦN camera = vẽ ĐÈ LÊN lọ trên. Camera
+// cảnh này nhìn -Z nên z LỚN = gần => bước dương +2, cùng một trật tự che nhau.
+//
+// Hệ quả: slot sâu nhất có mặt trước ở z = 0.2 + 2·2 = 4.2, nên Z_HINT/Z_CTA phải nâng lên 8 (trước là 1).
+// Nâng z KHÔNG đổi hình gì vì camera ORTHO — chỉ đổi thứ tự che nhau.
+const JAR_Z_STEP = 2;
 
 const JAR_POINT_A_X = 0;
 const JAR_POINT_A_Y = -2;
@@ -108,15 +119,15 @@ const JAR_MOUTH_H = 3;
 const Z_RIG = -0.2;        // rig ở SAU tranh: cát + tranh phải nằm trên khung
 const Z_PICTURE = -0.05;
 const Z_GRAIN = 0;
-const Z_JAR = 0.2;
-const Z_JAR_FLY = 0.25;    // cung bay phải nằm TRƯỚC thân lọ, nếu không hạt chui vào sau lọ ở cuối cung
-const Z_HINT = 1;
-const Z_CTA = 1;
+const Z_JAR = 0.2;         // slot 0 (head). Slot dưới CỘNG thêm JAR_Z_STEP mỗi bậc -> nằm TRƯỚC head.
+const Z_JAR_FLY = 0.25;    // cung bay phải nằm TRƯỚC thân lọ HEAD, nếu không hạt chui vào sau lọ ở cuối cung
+const Z_HINT = 8;
+const Z_CTA = 8;
 /**
- * Trần của núm `box.dz` (board-layout.txt): mặt trước hộp = Z_JAR + dz, phải luôn ở SAU nút CTA. Chừa 0.05
- * làm đệm để hộp không z-fight với CTA.
+ * Trần của núm `box.dz` (board-layout.txt): mặt trước hộp SÂU NHẤT = Z_JAR + JAR_Z_STEP·(số slot−1) + dz,
+ * phải luôn ở SAU nút CTA. Chừa 0.05 làm đệm để hộp không z-fight với CTA.
  */
-const MAX_BOX_DZ = Z_CTA - Z_JAR - 0.05;
+const MAX_BOX_DZ = Z_CTA - 0.05 - (Z_JAR + JAR_Z_STEP * (JAR_SLOT_Y.length - 1));
 
 @ccclass('AdRoot')
 export class AdRoot extends Component {
@@ -131,6 +142,13 @@ export class AdRoot extends Component {
 
   @property({ tooltip: 'Bán kính brush vuốt, theo Ô CƠ CHẾ' })
   brushRadiusCells = 3;
+
+  @property({
+    tooltip: 'Số frame LIÊN TIẾP mà rìa brush chạm biên túi thì ĐÓNG TÚI GIỮA NÉT (tay vẫn giữ). '
+      + 'Nguồn: GrainTuningConfig.swipeBatchEmptyStampsToClose = 1. Đặt 0 = TẮT mốc rìa -> túi chỉ đóng khi nhả tay.',
+    min: 0,
+  })
+  swipeEmptyStampsToClose = 1;
 
   @property({ tooltip: 'network id của variant đang build' })
   network: string = 'applovin';
@@ -216,6 +234,8 @@ export class AdRoot extends Component {
   private simAccum = 0;
   private touching = false;
   private strokeArc = 0;
+  /** Số frame LIÊN TIẾP mà dấu chân brush đã chạm biên túi (nguồn: SandSwipeController._emptyStampStreak). */
+  private emptyStampStreak = 0;
   private readonly lastCell = { x: 0, y: 0 };
   private readonly tmpWorld = new Vec3();
 
@@ -349,6 +369,7 @@ export class AdRoot extends Component {
   private reportBoot(): void {
     const texKeys = Object.keys(this.boxTex);
     const fit = lastBoxFit();
+    const zDeep = Z_JAR + JAR_Z_STEP * (JAR_SLOT_Y.length - 1) + this.layout.box.dz;
     const lines = [
       `[boot] mode=${this.solverMode.toUpperCase()} lo=${this.level.jars.length} `
       + `poolCap=${this.solver.pool.capacity} rigStandIn=${this.showRigStandIn}`,
@@ -357,9 +378,11 @@ export class AdRoot extends Component {
       + `board=${this.boardLayers}/${this.layout.board.length} layout=${this.layoutSource}`,
       `[boot] boxAnim: ${this.layout.anim.enabled ? 'BAT' : 'TAT'} loCoAnim=${this.jarsAnimated}/${this.level.jars.length} `
       + `clip=[${this.boxAnimSlots}] speed=${this.layout.anim.speed}`,
-      `[boot] box: day=${fit.depth.toFixed(2)} matTruocZ=${(Z_JAR + this.layout.box.dz).toFixed(2)} `
-      + `matSauZ=${(Z_JAR + fit.backLocalZ).toFixed(2)} dz=${this.layout.box.dz} `
+      `[boot] box: day=${fit.depth.toFixed(2)} zSlot0=${Z_JAR.toFixed(2)} zSlotSau=${zDeep.toFixed(2)} `
+      + `buocZ=${JAR_Z_STEP} dz=${this.layout.box.dz} matSauZ(slot0)=${(Z_JAR + fit.backLocalZ).toFixed(2)} `
       + `-> art nen phai co z < ${(Z_JAR + fit.backLocalZ).toFixed(2)} moi khong che ruot hop`,
+      `[boot] fill: ${this.layout.fill.enabled ? 'BAT' : 'TAT'} khoi=${this.layout.fill.smoke ? 'BAT' : 'TAT'} `
+      + `range=${this.layout.fill.range} ctaZ=${Z_CTA} tranDz=${MAX_BOX_DZ.toFixed(2)}`,
     ];
     for (const l of lines) console.log(l);
     this.sendProbe(lines);
@@ -490,7 +513,7 @@ export class AdRoot extends Component {
       const cx = JAR_COLUMN_X[c];
       specs.push({
         jars: [],
-        slots: JAR_SLOT_Y.map((y) => new Vec3(cx, y, Z_JAR)),
+        slots: JAR_SLOT_Y.map((y, i) => new Vec3(cx, y, Z_JAR + JAR_Z_STEP * i)),
         // Hộp RIÊNG từng cột — KHÔNG dùng chung 1 object, mỗi cột 1 bbox tại chỗ đứng của chính nó.
         mouth: mouthFromCenterSize(cx, mouthCenterY, JAR_MOUTH_W, JAR_MOUTH_H),
       });
@@ -525,6 +548,9 @@ export class AdRoot extends Component {
         console.warn(`[AdRoot] lọ "${spec.colorName}" không map được sang colorId — lọ này sẽ KHÔNG hút hạt.`);
       }
       jar.setup(spec.colorName, cid, spec.capacity);
+      // Mực cát + khói: dựng SAU setup để nó đọc được màu, và gắn vào node LỌ (không phải node hộp) — hộp bị
+      // BoxVisual scale/xoay, treo mặt cát vào đó là mọi số tuning phải nhân ngược hệ số fit.
+      if (this.layout.fill.enabled) jar.fillVisual = new JarFillVisual(node, this.layout.fill, rgb);
       jar.node.active = !spec.hidden;
       jar.onFull(() => this.runner?.notifyJarFull());
       specs[spec.column].jars.push(jar);
@@ -753,6 +779,10 @@ export class AdRoot extends Component {
     if (c === null) return;
     this.touching = true;
     this.strokeArc = 0;
+    this.emptyStampStreak = 0;
+    // Nguồn OnStrokeBegin: đóng túi của nét TRƯỚC nếu vì lý do bất thường nó còn mở — 2 nét dính vào 1 túi thì
+    // thứ tự drain (đo bằng quãng đường ngón tay) trộn của cả hai, cát rơi sai chỗ.
+    this.host.closeStroke();
     this.lastCell.x = c.x;
     this.lastCell.y = c.y;
     this.host.carveAt(c.x, c.y, this.brushRadiusCells, this.strokeArc);
@@ -780,13 +810,44 @@ export class AdRoot extends Component {
   private onTouchEnd(_e: EventTouch): void {
     if (!this.touching) return;
     this.touching = false;
+    this.emptyStampStreak = 0;
     this.host.closeStroke();
+  }
+
+  /**
+   * D2 vế (b) — ĐÓNG TÚI GIỮA NÉT. Port `SandSwipeController.OnStrokeApplied`.
+   *
+   * VÌ SAO CẦN (bug user báo 2026-08-25 "swipe bên Unity tới đâu cát rơi tới đó, bên này chờ vuốt xong"):
+   * ConversionFront gate kênh Swipe/Thin theo `hasOpenBatch` (đúng nguồn), mà bản Cocos trước CHỈ đóng túi ở
+   * TOUCH_END -> gate chặn suốt cả nét -> toàn bộ cát dồn lại xả 1 phát lúc nhả tay. Nguồn có HAI mốc đóng:
+   * nhả tay VÀ mốc rìa này; thiếu mốc rìa là mất luôn cảm giác "vuốt tới đâu rơi tới đó".
+   *
+   * CHẠY MỖI FRAME (không phải mỗi TOUCH_MOVE): nguồn gọi trong Apply theo frame, nên ngón DỪNG YÊN ngoài vùng
+   * sống vẫn đóng được túi. Cocos chỉ bắn TOUCH_MOVE khi ngón DI CHUYỂN -> gắn vào đó là ngón dừng = túi treo.
+   *
+   * HỎI THEO `lastCell` (vị trí ngón HIỆN TẠI), không đọc cờ cache của nhát cào cuối: ra ngoài field thì carve
+   * không chạy -> cờ cache đứng ở true -> streak reset mỗi frame -> lại chỉ đóng lúc nhả tay (đúng bug nguồn
+   * đã vấp 2026-07-30).
+   */
+  private tickStrokeClose(): void {
+    if (this.swipeEmptyStampsToClose <= 0) return;
+    if (!this.host.hasOpenBatch) return;   // nét này chưa ăn tranh lần nào -> không có gì để đóng
+    if (this.host.brushFootprintFullyLive(this.lastCell.x, this.lastCell.y, this.brushRadiusCells)) {
+      this.emptyStampStreak = 0;           // "LIÊN TIẾP" = liên tiếp chạm biên túi
+      return;
+    }
+    if (++this.emptyStampStreak < this.swipeEmptyStampsToClose) return;
+    // Brush đã ra hẳn vùng Empty/ngoài khung/đã convert -> đóng túi NGAY; nét vẫn tiếp tục và túi đó TAN luôn
+    // dù tay còn giữ. Chạm lại tranh thì host tự mở túi MỚI (1 nét qua 3 cụm tranh rời = 3 túi).
+    this.host.closeStroke();
+    this.emptyStampStreak = 0;
   }
 
   // ==================================================================== nhịp chạy
 
   update(dt: number): void {
     if (!this.ready) return;
+    if (this.touching) this.tickStrokeClose();
 
     // Cap catch-up: 1 frame kẹt lâu không được kéo theo hàng chục step (spiral of death). Phần dt vượt trần bị
     // BỎ, tức ad chạy chậm lại thay vì đứng hình — đúng lựa chọn cho ad 15-30s.

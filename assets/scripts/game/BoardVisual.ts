@@ -29,6 +29,7 @@
 import { Color, Node, Texture2D } from 'cc';
 import { attachQuad } from './QuadVisual';
 import { BOX_ANIM_DEFAULT, type BoxAnimTuning } from './BoxAnim';
+import { JAR_FILL_DEFAULT, type JarFillTuning } from './JarFillVisual';
 
 /** 1 lớp art nền, ĐÃ quy về world — đúng 6 số mà file board-layout.txt cho chỉnh. */
 export interface BoardLayer {
@@ -60,6 +61,8 @@ export interface BoardLayout {
   box: BoxTuning;
   /** Công tắc anim hộp (Idle/Fill/Close/Open_box) — xem BoxAnim.ts. */
   anim: BoxAnimTuning;
+  /** Mực cát dâng + khói khi lọ nhận cát — xem JarFillVisual.ts. */
+  fill: JarFillTuning;
 }
 
 /** Rơi về đây khi board-layout.txt thiếu/hỏng. Số y hệt bản trong file JSON. */
@@ -72,6 +75,7 @@ export const BOARD_DEFAULT: BoardLayout = {
   ],
   box: { w: 3.6, h: 2.6, dx: 0, dy: 0, dz: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1, zScale: 1 },
   anim: BOX_ANIM_DEFAULT,
+  fill: JAR_FILL_DEFAULT,
 };
 
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && isFinite(v) ? v : fallback);
@@ -86,6 +90,7 @@ export function parseBoardLayout(text: string): BoardLayout {
   const d = BOARD_DEFAULT;
   const box = (raw.box ?? {}) as Partial<BoxTuning>;
   const anim = (raw.anim ?? {}) as Partial<BoxAnimTuning>;
+  const fill = (raw.fill ?? {}) as Partial<JarFillTuning>;
   const layers = Array.isArray(raw.board) ? raw.board : d.board;
   return {
     board: layers
@@ -111,6 +116,19 @@ export function parseBoardLayout(text: string): BoardLayout {
       closeOnFull: bool(anim.closeOnFull, d.anim.closeOnFull),
       idleBetween: bool(anim.idleBetween, d.anim.idleBetween),
       closedWhenWaiting: bool(anim.closedWhenWaiting, d.anim.closedWhenWaiting),
+    },
+    fill: {
+      enabled: bool(fill.enabled, d.fill.enabled),
+      w: num(fill.w, d.fill.w), h: num(fill.h, d.fill.h),
+      dx: num(fill.dx, d.fill.dx), dy: num(fill.dy, d.fill.dy), dz: num(fill.dz, d.fill.dz),
+      range: num(fill.range, d.fill.range),
+      smoke: bool(fill.smoke, d.fill.smoke),
+      smokeEvery: num(fill.smokeEvery, d.fill.smokeEvery),
+      smokeCount: num(fill.smokeCount, d.fill.smokeCount),
+      smokeSize: num(fill.smokeSize, d.fill.smokeSize),
+      smokeLife: num(fill.smokeLife, d.fill.smokeLife),
+      smokeRise: num(fill.smokeRise, d.fill.smokeRise),
+      smokeSpread: num(fill.smokeSpread, d.fill.smokeSpread),
     },
   };
 }
