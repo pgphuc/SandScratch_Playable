@@ -929,7 +929,15 @@ export class AdRoot extends Component {
     this.pointerScX = scl.x;
     this.pointerScY = scl.y;
     // z = 0: mặt phẳng gameplay. screenToWorld cần z trong khoảng near..far -> lấy khoảng cách camera tới z=0.
-    this.tmpWorld.set(loc.x, loc.y, this.gameCamera.node.worldPosition.z);
+    //
+    // DÙNG `scl` (getLocation = pixel MÀN HÌNH), KHÔNG dùng `loc` (getUILocation = hệ UI theo design
+    // resolution 1280x720). `screenToWorld` nhận hệ MÀN HÌNH; hai hệ chỉ TRÙNG NHAU khi khung thật bằng
+    // đúng design resolution — tức đúng cỡ cửa sổ preview trên máy dev, nên bug này vô hình suốt P4.
+    // Trên điện thoại hai hệ lệch hẳn -> nét vuốt quy ra ô nằm ngoài tranh -> cào không ăn gì.
+    // Đo được (2026-08-25): cùng file, cùng nét vuốt — 720x1280 cào rách mảng lớn, 414x896 tranh không
+    // suy suyển. Sự kiện DOM vẫn tới canvas đủ (touchstart 1 / touchmove 20 / touchcancel 0) nên không
+    // phải chuyện trình duyệt nuốt gesture.
+    this.tmpWorld.set(scl.x, scl.y, this.gameCamera.node.worldPosition.z);
     const w = this.gameCamera.screenToWorld(this.tmpWorld, this.tmpWorld);
     const c = this.map.worldToCell(w.x, w.y, { x: 0, y: 0 });
     return { x: Math.round(c.x), y: Math.round(c.y) };
