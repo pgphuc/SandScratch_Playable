@@ -17,7 +17,13 @@
       "loop": true,
       "hideOnFirstInput": false,
       "reshowAfterIdleSec": 15,
-      "path": [[0.30, 0.62], [0.70, 0.62]]
+      "strokeSec": 1.1,
+      "restSec": 0.45,
+      "sizePct": 0.12,
+      "tipPct": [0.2237, 0.1058],
+      "hideAfterCta": true,
+      "_note": "strokeSec = TOC DO (giay/luot di het duong). sizePct = cao ban tay theo % chieu cao man hinh. tipPct = dau ngon tro trong ui/hand.png [x tu trai, y tu TREN] — day la diem duoc ghim vao duong vuot. hideAfterCta = CTA hien ra thi hint tat han.",
+      "path": [[0.50, 0.4], [0.50, 0.62]]
     }
   },
 
@@ -59,8 +65,8 @@
       "kind": "floating_button",
       "_note": "CHỐT 2026-08-22: nút CTA nổi có chữ. CTA vẫn armed kiểu next_pointer_down — nút là TÍN HIỆU, chạm chỗ nào cũng mở store, không bắt buộc trúng nút. Gameplay KHÔNG bị chắn.",
       "anchor": "bottom_center",
-      "marginBottomPct": 0.08,
-      "widthPct": 0.62,
+      "marginBottomPct": 0.3,
+      "widthPct": 0.25,
       "animation": "pulse_scale",
       "pulse": {
         "cycles": 3,

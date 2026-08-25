@@ -20,8 +20,24 @@ export interface ScenarioHandHint {
   loop: boolean;
   hideOnFirstInput: boolean;
   reshowAfterIdleSec: number;
-  /** Đường vuốt theo TỈ LỆ màn hình [0..1], gốc dưới-trái. */
+  /** Đường vuốt theo TỈ LỆ màn hình [0..1], gốc dưới-trái. Phần tử ĐẦU = điểm bắt đầu, CUỐI = điểm kết thúc. */
   path: [number, number][];
+  /** TỐC ĐỘ: giây để đi hết đường 1 lượt. Thiếu -> HAND_STROKE_SEC (1.1). */
+  strokeSec?: number;
+  /** Nghỉ ở điểm cuối trước khi lặp (giây). Thiếu -> HAND_REST_SEC (0.45). */
+  restSec?: number;
+  /** Cao của bàn tay theo % CHIỀU CAO màn hình. Thiếu -> HAND_SIZE_PCT. */
+  sizePct?: number;
+  /**
+   * ĐẦU NGÓN TRỎ trong ảnh art, tỉ lệ [x từ trái, y từ TRÊN]. Đây là điểm được ghim vào đường vuốt — ghim tâm
+   * ảnh thì bàn tay chạy lệch hẳn so với chỗ nó chỉ. Thiếu -> HAND_TIP_PCT (đo từ hand.png).
+   */
+  tipPct?: [number, number];
+  /**
+   * CTA đã hiện thì hint TẮT HẲN, không hiện lại (user chốt 2026-08-25). Mặc định true. false = giữ hành vi cũ,
+   * ngồi im `reshowAfterIdleSec` giây là bàn tay quay lại đè lên nút CTA.
+   */
+  hideAfterCta?: boolean;
 }
 
 export interface ScenarioJson {
@@ -72,6 +88,8 @@ export class ScenarioRunner extends Component {
   // pulse của nút CTA
   private pulseElapsed = 0;
   private pulseDone = false;
+  /** CTA đã armed + `hideAfterCta` -> mọi yêu cầu HIỆN hint bị chặn tại `showHandHint`. */
+  private hintLocked = false;
 
   get phase(): ScenarioPhase { return this.phaseValue; }
   get isArmed(): boolean { return this.phaseValue === 'armed'; }
@@ -98,6 +116,7 @@ export class ScenarioRunner extends Component {
     this.swipeCount = 0;
     this.pulseElapsed = 0;
     this.pulseDone = false;
+    this.hintLocked = false;
 
     if (this.ctaNode !== null) this.ctaNode.active = false;
     this.showHandHint(true);   // beat "hint-in" at 0.6s — xem note trong update()
@@ -234,10 +253,17 @@ export class ScenarioRunner extends Component {
     this.pulseDone = false;
     const cue = this.scenario.cta.visualCue;
     if (this.ctaNode !== null && cue?.enabled !== false) this.ctaNode.active = true;
+    // Nút CTA hiện ra là hint hết việc: khoá TRƯỚC rồi mới tắt, để nhánh "hint-in" và nhánh reshow-idle trong
+    // update() không bật lại ở frame kế.
+    if (this.scenario.input.handHint.hideAfterCta !== false) {
+      this.hintLocked = true;
+      this.showHandHint(false);
+    }
   }
 
   private showHandHint(on: boolean): void {
     if (this.handHintNode === null) return;
+    if (on && this.hintLocked) return;
     if (this.handHintNode.active !== on) this.handHintNode.active = on;
   }
 }

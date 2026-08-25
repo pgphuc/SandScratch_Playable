@@ -10,9 +10,13 @@ import { Component, Vec3, _decorator } from 'cc';
 
 const { ccclass } = _decorator;
 
-/** 1 vòng vuốt + quãng nghỉ trước khi lặp. */
-const STROKE_SEC = 1.1;
-const REST_SEC = 0.45;
+/**
+ * 1 vòng vuốt + quãng nghỉ trước khi lặp — MẶC ĐỊNH, ghi đè bằng `scenario.input.handHint.strokeSec/restSec`.
+ * TỐC ĐỘ tính theo GIÂY/LƯỢT chứ không phải world/giây: đường vuốt đo theo tỉ lệ màn hình, nên đổi độ dài
+ * đường mà vẫn giữ nguyên nhịp vuốt trên mọi tỉ lệ màn.
+ */
+export const HAND_STROKE_SEC = 1.1;
+export const HAND_REST_SEC = 0.45;
 
 @ccclass('HandHint')
 export class HandHint extends Component {
@@ -20,6 +24,17 @@ export class HandHint extends Component {
   private segLen: number[] = [];
   private total = 0;
   private t = 0;
+  private strokeSec = HAND_STROKE_SEC;
+  private restSec = HAND_REST_SEC;
+
+  /**
+   * Nhịp vuốt. `strokeSec` <= 0 bị bỏ qua (giữ mặc định) — chia cho 0 thì hint đứng chết ở điểm đầu và
+   * không ai đoán ra vì sao.
+   */
+  setTiming(strokeSec: number, restSec: number): void {
+    if (strokeSec > 0) this.strokeSec = strokeSec;
+    if (restSec >= 0) this.restSec = restSec;
+  }
 
   /** `points` = đường vuốt ĐÃ đổi sang world. < 2 điểm -> hint đứng yên tại điểm đầu. */
   setPath(points: Vec3[]): void {
@@ -40,10 +55,10 @@ export class HandHint extends Component {
   update(dt: number): void {
     if (this.path.length < 2 || this.total <= 0) return;
     this.t += dt;
-    const cycle = STROKE_SEC + REST_SEC;
+    const cycle = this.strokeSec + this.restSec;
     const local = this.t % cycle;
     // Trong quãng nghỉ thì đứng ở điểm cuối rồi nhảy về đầu — nhảy giữa vòng làm mắt bám nhầm hướng vuốt.
-    const k = local >= STROKE_SEC ? 1 : local / STROKE_SEC;
+    const k = local >= this.strokeSec ? 1 : local / this.strokeSec;
 
     let want = k * this.total;
     for (let i = 0; i < this.segLen.length; i++) {
