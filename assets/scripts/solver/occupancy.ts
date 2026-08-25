@@ -291,17 +291,49 @@ const _push: V2 = { x: 0, y: 0 };
  * Gradient-eject: hạt ĐANG TRONG ô occupied bị đẩy XUỐNG DỐC mật độ (về phía trống), bước bị kẹp <= maxStep.
  * Chỉ còn là FALLBACK cho hạt spawn-inside — đường chính là sweepBlocked.
  */
+/**
+ * CHẨN ĐOÁN cú đẩy thoát của resolveOccupancy (2026-08-25). Đo thật: một hạt đứng NGUYÊN toạ độ (-2.41,27.71)
+ * suốt 270+ step trong khi |v| tăng 14.5 -> 25.2 — tức bước đi bị hoàn tác mỗi step và cú đẩy ra ĐÚNG 0.
+ * Hàm có 3 nhánh thoát sớm khác nhau, mỗi nhánh là một chỗ sửa khác hẳn; không gắn số thì chỉ đoán được.
+ *
+ * `code`: 0 chưa gọi · 1 NGOÀI tranh · 2 ô KHÔNG đặc (bất thường: sweepBlocked vừa bảo là đặc) ·
+ *         3 push suy biến ~0 (nearestFreeDirPic không tìm ra hướng) · 4 CÓ đẩy (kèm step thật).
+ * Chỉ ghi khi `occEjectDiag.on` — tắt thì 1 phép so sánh, không đụng đường nóng.
+ */
+export const occEjectDiag = {
+  on: false, code: 0, pushX: 0, pushY: 0, step: 0, calls: 0,
+  /** Nhánh + độ đẩy của TỪNG hạt ở step vừa rồi. Bản chỉ-1-biến-toàn-cục trước đó VÔ DỤNG: hạt không hề gọi
+   *  resolveOccupancy vẫn in ra số của hạt khác, đọc log tưởng có đẩy mà thật ra không ai gọi. integrate ghi. */
+  perGrainCode: null as Uint8Array | null,
+  perGrainStep: null as Float32Array | null,
+  perGrainPushX: null as Float32Array | null,
+  perGrainPushY: null as Float32Array | null,
+};
+
+/** Cấp mảng chẩn đoán theo hạt. Gọi 1 lần lúc dựng khi bật probe; không gọi = mọi thứ null = 0 phí. */
+export function allocOccEjectDiag(capacity: number): void {
+  occEjectDiag.perGrainCode = new Uint8Array(capacity);
+  occEjectDiag.perGrainStep = new Float32Array(capacity);
+  occEjectDiag.perGrainPushX = new Float32Array(capacity);
+  occEjectDiag.perGrainPushY = new Float32Array(capacity);
+}
+
+/** Tên nhánh để in ra log. */
+export const OCC_EJECT_NAME = ['chua-goi', 'ngoai-tranh', 'o-khong-dac', 'push-suy-bien', 'co-day'];
+
 export function resolveOccupancy(p: V2, v: V2, occ: GrainOccupancyField, snapshot: Uint8Array, sdt: number): void {
   const relX = p.x - occ.worldOriginX, relY = p.y - occ.worldOriginY;
   const pxf = occ.invRow0X * relX + occ.invRow0Y * relY;
   const col = colOfPx(occ, pxf);                                    // cùng phép chọn cột với sweepBlocked
   const pyf = occ.invRow1X * relX + occ.invRow1Y * relY - scrollPyOf(occ, col);
+  if (occEjectDiag.on) { occEjectDiag.calls++; occEjectDiag.code = 1; occEjectDiag.step = 0; }
   if (pxf < 0 || pxf >= occ.pictureWidth || pyf < 0 || pyf >= occ.pictureHeight) return;   // ngoài tranh
   colOccBounds(occ, col, _bounds);
   const oxMin = _bounds.oxMin, oxMax = _bounds.oxMax;
   const oyMin = revealOyMin(occ, col);
   const ox = Math.trunc(pxf / occ.occCellPixels);                   // (int) cast của nguồn; pxf>=0 nên == floor
   const oy = Math.trunc(pyf / occ.occCellPixels);
+  if (occEjectDiag.on) occEjectDiag.code = 2;
   if (!occAt(snapshot, occ, ox, oy, oxMin, oxMax, oyMin)) return;   // ô trống (pixel đã tan / không có tranh)
 
   // Gradient của trường ĐÃ dịch = gradient trường gốc -> offset scroll KHÔNG đụng công thức dưới.
@@ -316,10 +348,12 @@ export function resolveOccupancy(p: V2, v: V2, occ: GrainOccupancyField, snapsho
   _push.x = ppx * occ.pxAxisWorldX + ppy * occ.pyAxisWorldX;
   _push.y = ppx * occ.pxAxisWorldY + ppy * occ.pyAxisWorldY;
   normalizeSafe(_push);
+  if (occEjectDiag.on) { occEjectDiag.code = 3; occEjectDiag.pushX = _push.x; occEjectDiag.pushY = _push.y; }
   if (_push.x * _push.x + _push.y * _push.y < 1e-8) return;
 
   // CLAMP bước đẩy: pushStrength·sdt lớn -> VỌT lên quá mặt = nảy. Kẹp <= maxStep để hạt CHỈ chạm mặt rồi DỪNG.
   const step = Math.min(occ.pushStrength * sdt, occ.maxStep);
+  if (occEjectDiag.on) { occEjectDiag.code = 4; occEjectDiag.step = step; }
   p.x += _push.x * step;
   p.y += _push.y * step;
   const vn = v.x * _push.x + v.y * _push.y;                          // giết vận tốc ĐÂM VÀO tranh

@@ -197,6 +197,31 @@ export class PictureTexture {
     out.b = this.base[o + 2] / 255;
     out.a = this.base[o + 3] / 255;
   }
+
+  /** CHẨN ĐOÁN (StaticProbe.PixelProbe): alpha LỚN NHẤT đang hiển thị trong khối view của ô cơ chế. -1 = ngoài biên. */
+  liveAlphaAt(px: number, py: number): number {
+    if (!this.inMech(px, py)) return -1;
+    const s = this.viewScale;
+    let a = 0;
+    for (let dy = 0; dy < s; dy++) {
+      const vy = py * s + dy;
+      if (vy >= this.viewHeight) break;
+      for (let dx = 0; dx < s; dx++) {
+        const vx = px * s + dx;
+        if (vx >= this.viewWidth) break;
+        const v = this.live[(vy * this.viewWidth + vx) * RGBA_STRIDE + 3];
+        if (v > a) a = v;
+      }
+    }
+    return a;
+  }
+
+  /** CHẨN ĐOÁN: alpha GỐC (pixel đầu khối) của ô cơ chế. -1 = ngoài biên. */
+  baseAlphaAt(px: number, py: number): number {
+    if (!this.inMech(px, py)) return -1;
+    const s = this.viewScale;
+    return this.base[((py * s) * this.viewWidth + px * s) * RGBA_STRIDE + 3];
+  }
 }
 
 /** "#RRGGBB" hoặc "#RRGGBBAA" (chấp cả không dấu #) -> ghi 4 byte. Chuỗi lạ = pixel trống, KHÔNG throw. */

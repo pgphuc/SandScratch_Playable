@@ -18,7 +18,7 @@ import {
   wallMaskForSweep, popLowestSegment, sweepMask, type SweepMask,
   type GrainSdfField, type GrainWallGrid, type V2,
 } from './sdfWalls';
-import { sweepBlocked, creepDownhill, type GrainOccupancyField } from './occupancy';
+import { sweepBlocked, creepDownhill, occEjectDiag, type GrainOccupancyField } from './occupancy';
 
 // --- helper toán (Unity.Mathematics) --------------------------------------------------------------------------------
 
@@ -264,6 +264,9 @@ export function integrate(positions: Float32Array, velocities: Float32Array, pos
     _p.x = positions[i2]; _p.y = positions[i2 + 1];
     _v.x = velocities[i2]; _v.y = velocities[i2 + 1];
     let ghosting = ghost[i] !== 0;        // (Booster blast) đang xuyên tranh -> bỏ occupancy trong vòng substep
+    // CHẨN ĐOÁN theo TỪNG hạt: xoá về 0 = "chưa gọi resolveOccupancy lần nào trong step này". Phân biệt được
+    // "không ai đẩy" với "có đẩy mà vô hiệu" — hai bug khác hẳn nhau mà biến toàn cục không tách nổi.
+    if (occEjectDiag.on) occEjectDiag.code = 0;
     const releaseY = ghostReleaseY[i];
 
     // SUBSTEP: chia dt/N, mỗi bước tích pos NGẮN rồi resolve NGAY. Chống tunneling — hạt rơi nhanh không nhảy qua
@@ -288,6 +291,13 @@ export function integrate(positions: Float32Array, velocities: Float32Array, pos
         // kênh vận tốc. creepSpeed<=0 -> no-op (default TẮT).
         creepDownhill(_p, p.occ, p.occSnapshot, p.occSnapshotRaw, sdt, p.gravityX, p.gravityY);
       }
+    }
+
+    if (occEjectDiag.on && occEjectDiag.perGrainCode !== null && i < occEjectDiag.perGrainCode.length) {
+      occEjectDiag.perGrainCode[i] = occEjectDiag.code;
+      occEjectDiag.perGrainStep![i] = occEjectDiag.step;
+      occEjectDiag.perGrainPushX![i] = occEjectDiag.pushX;
+      occEjectDiag.perGrainPushY![i] = occEjectDiag.pushY;
     }
 
     positions[i2] = _p.x; positions[i2 + 1] = _p.y;

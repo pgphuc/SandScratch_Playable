@@ -44,6 +44,12 @@ export class SandGrainRenderer extends Component {
 
   // View cắt theo count hiện hành. Dựng lại CHỈ khi count đổi -> vòng update không cấp phát.
   private viewCount = -1;
+  /**
+   * Số quad ĐÃ TỪNG được ghi dữ liệu. Khi pool co lại, slot [count, highWater) vẫn giữ TÂM + BÁN KÍNH của hạt cũ
+   * trong buffer đỉnh. Về lý thuyết chúng nằm ngoài vùng vẽ (updateSubMesh có hạ drawInfo.indexCount), nhưng "về
+   * lý thuyết" là thứ đã làm hỏng 3 phiên đo — nên dọn thẳng: bán kính 0 = quad suy biến = vô hình.
+   */
+  private highWater = 0;
   private geom: primitives.IDynamicGeometry | null = null;
   private radiusAttr!: gfx.Attribute;
 
@@ -137,6 +143,16 @@ export class SandGrainRenderer extends Component {
       if (y + r > maxY) maxY = y + r;
     }
 
+    // DỌN ĐUÔI: quad của hạt vừa bị hút/kill vẫn còn tâm+bán kính cũ trong buffer -> ép bán kính 0 để dù có lọt
+    // vào vùng vẽ cũng không ra hình. Chỉ chạy đúng phần vừa co lại, không quét cả capacity.
+    if (n < this.highWater) {
+      for (let q = n; q < this.highWater; q++) {
+        const v = q * VERTS_PER_QUAD;
+        for (let k = 0; k < VERTS_PER_QUAD; k++) R[(v + k) * 2] = 0;
+      }
+    }
+    this.highWater = n;
+
     if (n === 0) {
       // Mesh rỗng: KHÔNG updateSubMesh với 0 đỉnh (một số backend coi là lỗi) — ẩn renderer là đủ và rẻ hơn.
       this.renderer.enabled = false;
@@ -159,6 +175,62 @@ export class SandGrainRenderer extends Component {
     } else {
       this.mesh.updateSubMesh(0, g);
     }
+  }
+
+  /**
+   * CHẨN ĐOÁN (phím P): số thật sự đang được VẼ, để đối chiếu với pool.count. `thuc-idx` là số index mesh khai báo
+   * cho draw call — lớn hơn `can-idx` nghĩa là vùng vẽ chưa co theo pool, tức có quad của hạt cũ đang lên hình.
+   */
+  diag(poolCount: number): string {
+    let idx = -1;
+    if (this.mesh !== null) {
+      const prim = this.mesh.struct.primitives[0];
+      if (prim !== undefined && prim.indexView !== undefined) idx = prim.indexView.count;
+    }
+    const on = this.renderer !== null && this.renderer.enabled ? 1 : 0;
+    const need = poolCount * INDICES_PER_QUAD;
+    const verdict = idx > need ? '<<< VUNG VE CHUA CO THEO POOL' : 'ok';
+    return '[P] mesh: bat=' + on + ' viewCount=' + this.viewCount + ' highWater=' + this.highWater
+      + ' pool=' + poolCount + ' can-idx=' + need + ' thuc-idx=' + idx + ' ' + verdict;
+  }
+
+  /**
+   * CHẨN ĐOÁN (phím P) — ĐỌC THẲNG BUFFER ĐỈNH CPU tại 1 điểm world.
+   *
+   * Vì sao cần: `diag()` chỉ đếm index khai báo, không nói quad NÀO đang nằm ở đâu. Khi mắt thấy chấm đứng im mà
+   * brute-force trên `pool.positions` trả 0 hạt trong bán kính, chỉ có 3 khả năng — hàm này tách được cả 3:
+   *   khong-co-dinh   buffer CPU sạch  -> dữ liệu cũ nằm ở GPU (lỗi đường upload updateSubMesh/geom view)
+   *   q>=n            quad đuôi vẫn lọt draw range dù indexCount đã hạ
+   *   q<n LECH        có kẻ ghi đè buffer sau syncFromPool (pool.positions[q] khác hẳn tâm quad q)
+   */
+  probeQuad(wx: number, wy: number, r: number, pool: GrainParticlePool): string[] {
+    if (this.capacity === 0) return ['[P] quad: renderer CHUA INIT (capacity=0)'];
+    const out: string[] = [];
+    const n = Math.min(pool.count, this.capacity);
+    const r2 = r * r;
+    const P = this.positions, R = this.radii;
+    let hits = 0;
+    // Quét TOÀN capacity, không chỉ [0,n) — mục đích là bắt quad NGOÀI vùng vẽ mà vẫn có toạ độ ở đây.
+    for (let q = 0; q < this.capacity && hits < 8; q++) {
+      const v0 = q * VERTS_PER_QUAD * 3;
+      const qx = P[v0], qy = P[v0 + 1];
+      const dx = qx - wx, dy = qy - wy;
+      if (dx * dx + dy * dy > r2) continue;
+      hits++;
+      const rad = R[q * VERTS_PER_QUAD * 2];
+      const inDraw = q < n ? `q<n(${n})` : `q>=n(${n}) NGOAI-VUNG-VE`;
+      let cmp = 'pool: (khong co hat o slot nay)';
+      if (q < pool.count) {
+        const px = pool.positions[q * 2], py = pool.positions[q * 2 + 1];
+        const d = Math.hypot(qx - px, qy - py);
+        cmp = `pool[q]=(${px.toFixed(2)},${py.toFixed(2)}) lech=${d.toFixed(3)}`
+            + (d > 0.02 ? '  <<< QUAD KHONG THEO POOL' : '');
+      }
+      out.push(`[P]   quad#${q} @(${qx.toFixed(2)},${qy.toFixed(2)}) r=${rad.toFixed(3)} ${inDraw} | ${cmp}`);
+    }
+    out.unshift(`[P] quad: tim trong R=${r.toFixed(2)} -> ${hits === 0 ? 'KHONG CO DINH NAO (nghi GPU giu ban cu)' : hits + ' quad'}`
+      + ` | capacity=${this.capacity} viewCount=${this.viewCount} highWater=${this.highWater} pool=${pool.count}`);
+    return out;
   }
 
   /** Cắt view theo count. Chỉ chạy khi count ĐỔI -> không cấp phát ở frame ổn định. */

@@ -57,6 +57,13 @@ export class SandSolver {
    */
   ccdDiag: Uint8Array | null = null;
 
+  /**
+   * CHẨN ĐOÁN: buffer lưới neighbor của step VỪA chạy (cellIndex/cellStart/entryIdx). `probePoint` đọc để lặp
+   * ĐÚNG phép query mà contactAccumulate dùng — hỏi "hạt này có TỒN TẠI với hạt khác không", thay vì tự dựng lại
+   * một phép query khác rồi kết luận nhầm. CHỈ ĐỌC.
+   */
+  get gridBuffers(): GrainNeighborGridBuffers { return this.grid; }
+
   /** posPredicted của step vừa chạy (mốc CUỐI integrate) — chỉ để probe suy corr = pos - predicted. CHỈ ĐỌC. */
   get predicted(): Float32Array { return this.posPredicted; }
 

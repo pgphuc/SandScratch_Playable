@@ -98,7 +98,13 @@ export class SandPictureHost implements PictureHost {
 
   restoreVisualCell(px: number, py: number, orderT: number): void {
     this.tex.restore(px, py, orderT);
+    // CHẨN ĐOÁN: ghi ô vừa REVERT (Held->Solid, sáng lại) để PixelProbe in ra — đây là đường duy nhất làm 1 pixel
+    // tranh "hiện lại" sau khi đã mờ. Trần 512 để không phình nếu probe tắt.
+    if (this.revertDiag.length < 512) this.revertDiag.push(py * this.model.width + px);
   }
+
+  /** CHẨN ĐOÁN (StaticProbe.PixelProbe đọc rồi xoá): index ô đã revert kể từ lần đọc trước. */
+  readonly revertDiag: number[] = [];
 
   /** Ô đã cào nhưng chưa tan -> mờ 0.8 (nguồn: DimCarvedVisual). Gọi sau mỗi lượt carve. */
   private dimCarvedVisual(): void {
