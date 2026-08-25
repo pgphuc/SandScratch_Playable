@@ -121,7 +121,7 @@
     "network": "applovin",
     "debugHud": true,
     "solverMode": "A",
-    "showRigStandIn": true,
+    "showRigStandIn": false,
     "staticProbe": true,
     "staticProbePeriod": 2,
     "staticProbeSink": "http://127.0.0.1:7799/",

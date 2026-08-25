@@ -18,11 +18,17 @@
 // Z: Unity camera nhìn +Z nên z LỚN = XA; cảnh này camera nhìn -Z nên z lớn = GẦN => thứ tự lớp ĐẢO so với số z
 // của prefab. Vì vậy z ở đây đặt lại theo thứ tự lớp, không bê nguyên số z Unity.
 //
+// VÌ SAO z TỚI -8 CHỨ KHÔNG PHẢI -1.2 NHƯ BẢN ĐẦU: hộp lọ là MESH 3D dày ~1.9 world (xoay rotX=45 thì ~2.6) và
+// đuôi hộp thụt về SAU mặt phẳng lọ (z=0.2), tức chạm tới z ≈ -1.7..-2.4. Art nền ở -1.2/-1.0 nằm CHEN GIỮA nên
+// pass transparent của nó vẽ đè lên ruột hộp (user báo 2026-08-25: "ruột hộp bị màu xanh bg_ipad che"). Camera
+// ORTHO nên đẩy z ra xa KHÔNG đổi kích thước ảnh — chỉ đổi thứ tự che nhau, đây là sửa miễn phí.
+//
 // ⚠ CHƯA làm: biến thể theo độ khó (*_Hard/_Veryhard — xem DifficultyViewSprite.cs) · khung1/2/3 · thanhchan ·
 // Arrow · mask. Ad chỉ chạy 1 level Normal nên 4 lớp ở đây là đủ khung hình.
 
 import { Color, Node, Texture2D } from 'cc';
 import { attachQuad } from './QuadVisual';
+import { BOX_ANIM_DEFAULT, type BoxAnimTuning } from './BoxAnim';
 
 /** 1 lớp art nền, ĐÃ quy về world — đúng 6 số mà file board-layout.txt cho chỉnh. */
 export interface BoardLayer {
@@ -42,6 +48,8 @@ export interface BoardLayer {
 export interface BoxTuning {
   w: number; h: number;
   dx: number; dy: number;
+  /** Đẩy MẶT TRƯỚC hộp tới/lui theo z (world). Dương = ra gần màn hình. Bị kẹp dưới Z_CTA trong AdRoot. */
+  dz: number;
   rotX: number; rotY: number; rotZ: number;
   scale: number;
   zScale: number;
@@ -50,20 +58,24 @@ export interface BoxTuning {
 export interface BoardLayout {
   board: BoardLayer[];
   box: BoxTuning;
+  /** Công tắc anim hộp (Idle/Fill/Close/Open_box) — xem BoxAnim.ts. */
+  anim: BoxAnimTuning;
 }
 
 /** Rơi về đây khi board-layout.txt thiếu/hỏng. Số y hệt bản trong file JSON. */
 export const BOARD_DEFAULT: BoardLayout = {
   board: [
-    { res: 'board/bg_ipad', x: 0.025, y: 12.4, w: 34.5, h: 37.157, z: -1.2 },
-    { res: 'board/Artboard', x: 0.025, y: 17, w: 24.84, h: 49.68, z: -1.0 },
-    { res: 'board/khungbangchuyen', x: 0.025, y: 3.338, w: 18.446, h: 6.82, z: -0.9 },
-    { res: 'board/Bangchuyen2', x: -0.044, y: 3.154, w: 13.34, h: 2.22, z: -0.85 },
+    { res: 'board/bg_ipad', x: 0.025, y: 12.4, w: 34.5, h: 37.157, z: -8 },
+    { res: 'board/Artboard', x: 0.025, y: 17, w: 24.84, h: 49.68, z: -7 },
+    { res: 'board/khungbangchuyen', x: 0.025, y: 3.338, w: 18.446, h: 6.82, z: -6 },
+    { res: 'board/Bangchuyen2', x: -0.044, y: 3.154, w: 13.34, h: 2.22, z: -5.9 },
   ],
-  box: { w: 3.6, h: 2.6, dx: 0, dy: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1, zScale: 1 },
+  box: { w: 3.6, h: 2.6, dx: 0, dy: 0, dz: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1, zScale: 1 },
+  anim: BOX_ANIM_DEFAULT,
 };
 
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && isFinite(v) ? v : fallback);
+const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 
 /**
  * Đọc JSON chỉnh tay. Hỏng ở đâu thì vá chỗ đó bằng mặc định — KHÔNG vứt cả file, vì người chỉnh tay hay để lỡ
@@ -73,6 +85,7 @@ export function parseBoardLayout(text: string): BoardLayout {
   const raw = JSON.parse(text) as Partial<BoardLayout>;
   const d = BOARD_DEFAULT;
   const box = (raw.box ?? {}) as Partial<BoxTuning>;
+  const anim = (raw.anim ?? {}) as Partial<BoxAnimTuning>;
   const layers = Array.isArray(raw.board) ? raw.board : d.board;
   return {
     board: layers
@@ -86,9 +99,18 @@ export function parseBoardLayout(text: string): BoardLayout {
       }),
     box: {
       w: num(box.w, d.box.w), h: num(box.h, d.box.h),
-      dx: num(box.dx, d.box.dx), dy: num(box.dy, d.box.dy),
+      dx: num(box.dx, d.box.dx), dy: num(box.dy, d.box.dy), dz: num(box.dz, d.box.dz),
       rotX: num(box.rotX, d.box.rotX), rotY: num(box.rotY, d.box.rotY), rotZ: num(box.rotZ, d.box.rotZ),
       scale: num(box.scale, d.box.scale), zScale: num(box.zScale, d.box.zScale),
+    },
+    anim: {
+      enabled: bool(anim.enabled, d.anim.enabled),
+      speed: num(anim.speed, d.anim.speed),
+      openOnHead: bool(anim.openOnHead, d.anim.openOnHead),
+      fillOnHarvest: bool(anim.fillOnHarvest, d.anim.fillOnHarvest),
+      closeOnFull: bool(anim.closeOnFull, d.anim.closeOnFull),
+      idleBetween: bool(anim.idleBetween, d.anim.idleBetween),
+      closedWhenWaiting: bool(anim.closedWhenWaiting, d.anim.closedWhenWaiting),
     },
   };
 }

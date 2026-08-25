@@ -42,7 +42,8 @@ import { ColorJar } from './ColorJar';
 import { JarColumns, type JarColumnSpec } from './JarColumns';
 import { HandHint } from './HandHint';
 import { attachQuad } from './QuadVisual';
-import { attachBox, boxTextureName } from './BoxVisual';
+import { attachBox, boxTextureName, lastBoxFit } from './BoxVisual';
+import { BoxAnim } from './BoxAnim';
 import { buildBoardVisual, parseBoardLayout, BOARD_DEFAULT, type BoardLayout } from './BoardVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
@@ -111,6 +112,11 @@ const Z_JAR = 0.2;
 const Z_JAR_FLY = 0.25;    // cung bay phải nằm TRƯỚC thân lọ, nếu không hạt chui vào sau lọ ở cuối cung
 const Z_HINT = 1;
 const Z_CTA = 1;
+/**
+ * Trần của núm `box.dz` (board-layout.txt): mặt trước hộp = Z_JAR + dz, phải luôn ở SAU nút CTA. Chừa 0.05
+ * làm đệm để hộp không z-fight với CTA.
+ */
+const MAX_BOX_DZ = Z_CTA - Z_JAR - 0.05;
 
 @ccclass('AdRoot')
 export class AdRoot extends Component {
@@ -188,6 +194,11 @@ export class AdRoot extends Component {
   private readonly boxTex: Record<string, Texture2D> = {};
   /** Đường dẫn resources đã nạp được prefab hộp (hoặc lý do thiếu) — in ra log boot. */
   private boxPrefabPath = '(chua nap)';
+  /** Số lọ bắt được SkeletalAnimation của hộp (BoxAnim). 0 mà có mesh hộp = clip không tới được runtime. */
+  private jarsAnimated = 0;
+  /** Các giỏ clip tra được ở hộp cuối cùng gắn anim — boot log in để biết clip nào thiếu. */
+  private boxAnimSlots = '';
+
   /** Số lớp art nền dựng được (BoardVisual). Ít hơn số lớp trong layout = có PNG chưa nạp được. */
   private boardLayers = 0;
   /** Layout chỉnh tay được; mặc định = số suy từ prefab Unity. */
@@ -337,12 +348,18 @@ export class AdRoot extends Component {
   /** 1 lô log lúc boot xong: art nào nạp được, dựng được bao nhiêu lọ. Trả lời thẳng "sao không thấy asset". */
   private reportBoot(): void {
     const texKeys = Object.keys(this.boxTex);
+    const fit = lastBoxFit();
     const lines = [
       `[boot] mode=${this.solverMode.toUpperCase()} lo=${this.level.jars.length} `
       + `poolCap=${this.solver.pool.capacity} rigStandIn=${this.showRigStandIn}`,
       `[boot] art: boxPrefab=${this.boxPrefab !== null ? 'OK' : 'THIEU'} `
       + `boxTex=[${texKeys.join(',')}] boxPath=${this.boxPrefabPath} ctaTex=${this.ctaTex !== null ? 'OK' : 'THIEU'} `
       + `board=${this.boardLayers}/${this.layout.board.length} layout=${this.layoutSource}`,
+      `[boot] boxAnim: ${this.layout.anim.enabled ? 'BAT' : 'TAT'} loCoAnim=${this.jarsAnimated}/${this.level.jars.length} `
+      + `clip=[${this.boxAnimSlots}] speed=${this.layout.anim.speed}`,
+      `[boot] box: day=${fit.depth.toFixed(2)} matTruocZ=${(Z_JAR + this.layout.box.dz).toFixed(2)} `
+      + `matSauZ=${(Z_JAR + fit.backLocalZ).toFixed(2)} dz=${this.layout.box.dz} `
+      + `-> art nen phai co z < ${(Z_JAR + fit.backLocalZ).toFixed(2)} moi khong che ruot hop`,
     ];
     for (const l of lines) console.log(l);
     this.sendProbe(lines);
@@ -417,6 +434,9 @@ export class AdRoot extends Component {
     if (asset === null) { this.layoutSource = 'MAC DINH (khong co file)'; return; }
     try {
       this.layout = parseBoardLayout(asset.text);
+      // Kẹp dz TẠI ĐÂY chứ không ở BoxVisual: trần phụ thuộc Z_CTA/Z_JAR — hai hằng của cảnh, chỗ này biết,
+      // BoxVisual thì không. Vượt trần thì kẹp im lặng nhưng boot log in số ĐÃ kẹp để đối chiếu.
+      if (this.layout.box.dz > MAX_BOX_DZ) this.layout.box.dz = MAX_BOX_DZ;
       this.layoutSource = this.boardLayoutResPath;
     } catch (e) {
       this.layoutSource = `MAC DINH (JSON hong: ${(e as Error).message})`;
@@ -485,12 +505,19 @@ export class AdRoot extends Component {
       node.setParent(jarRoot);
       const rgb = hexOfColorName(spec.colorName);
       // Mesh hộp thật; thiếu prefab/atlas -> quad màu placeholder như bản trước (không để lọ tàng hình).
-      const boxed = this.boxPrefab !== null
-        && attachBox(node, this.boxPrefab, rgb >= 0 ? this.boxTex[boxTextureName(rgb)] ?? null : null,
-                     this.layout.box) !== null;
-      if (!boxed) attachQuad(node, JAR_W, JAR_H, hexToColor(rgb), null, false);
+      const boxNode = this.boxPrefab !== null
+        ? attachBox(node, this.boxPrefab, rgb >= 0 ? this.boxTex[boxTextureName(rgb)] ?? null : null,
+                    this.layout.box)
+        : null;
+      if (boxNode === null) attachQuad(node, JAR_W, JAR_H, hexToColor(rgb), null, false);
 
       const jar = node.addComponent(ColorJar);
+      // Anim hộp: clip đã nằm sẵn trong prefab fbx, chỉ cần bấm đúng lúc (BoxAnim). Không có anim -> hộp
+      // đứng bind pose y như bản trước, lọ vẫn chạy đủ.
+      if (boxNode !== null) {
+        jar.boxAnim = BoxAnim.attach(boxNode, this.layout.anim);
+        if (jar.boxAnim !== null) { this.jarsAnimated++; this.boxAnimSlots = jar.boxAnim.slots; }
+      }
       jar.mouthWidth = JAR_W;
       jar.mouthHeight = JAR_H;
       const cid = colorIdOfJarName(this.level, spec.colorName);

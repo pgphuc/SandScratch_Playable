@@ -13,6 +13,7 @@
 import { Component, Node, Vec3, tween, Tween, _decorator } from 'cc';
 import { harvestJar, mouthFromCenterSize, type HarvestedGrain, type MouthBounds } from '../solver/counting';
 import type { GrainParticlePool } from '../solver/pool';
+import type { BoxAnim } from './BoxAnim';
 
 const { ccclass, property } = _decorator;
 
@@ -42,6 +43,11 @@ export class ColorJar extends Component {
   private mouth: MouthBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private mouthDirty = true;
   private punch: Tween<Node> | null = null;
+  /**
+   * Anim skeletal của mesh hộp (BoxAnim). AdRoot gắn vào sau attachBox; null = hộp quad placeholder hoặc
+   * anim bị tắt trong board-layout.txt -> mọi lời gọi ở dưới thành no-op, logic lọ KHÔNG đổi.
+   */
+  boxAnim: BoxAnim | null = null;
   private readonly baseScale = new Vec3(1, 1, 1);
 
   /** Buffer hạt vừa hút — tái dùng, không cấp phát trong vòng update. */
@@ -54,6 +60,16 @@ export class ColorJar extends Component {
 
   onLoad(): void {
     this.baseScale.set(this.node.scale);
+  }
+
+  /** Chỉ để nhịp anim hộp chạy — KHÔNG đụng số đếm (đếm nằm ở harvest, gọi từ sim step 30Hz). */
+  update(dt: number): void {
+    this.boxAnim?.tick(dt);
+  }
+
+  /** Lọ vừa lên làm head của cột (JarColumns) = bắt đầu được nhận hạt -> mở nắp hộp. */
+  onBecomeHead(): void {
+    this.boxAnim?.open();
   }
 
   /** Gán thông số từ LevelLoad.JarSpec. Gọi TRƯỚC frame đầu. */
@@ -110,6 +126,7 @@ export class ColorJar extends Component {
 
     this.filledValue += got;
     this.playPunch();
+    this.boxAnim?.fill();
     if (this.filledValue >= this.capacity) this.markFull();
     return got;
   }
@@ -122,6 +139,7 @@ export class ColorJar extends Component {
     this.fullValue = true;
     this.filledValue = this.capacity;
     this.playFullBurst();
+    this.boxAnim?.close();
     // Handler có thể đọc/ghi state khác -> gọi SAU khi đã chốt fullValue, để re-entrancy không lật cờ lại.
     for (let i = 0; i < this.onFullHandlers.length; i++) this.onFullHandlers[i](this);
   }
@@ -150,6 +168,7 @@ export class ColorJar extends Component {
 
   /** Reset cho ScenarioRunner replay. */
   reset(): void {
+    this.boxAnim?.reset();
     this.punch?.stop();
     this.punch = null;
     this.node.setScale(this.baseScale);

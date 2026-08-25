@@ -6,12 +6,27 @@
     "board[]: moi lop la 1 anh PNG trong assets/resources/board/.",
     "  res = duong dan resources (khong duoi)   x,y = TAM anh theo world   w,h = be ngang/cao world",
     "  z   = lop ve. Nho hon = XA hon. Moc dang dung: tranh -0.05, hat 0, lo 0.2 -> art nen phai < -0.05.",
+    "  ⚠ Hop lo la MESH 3D day ~1.9 world (rotX=45 thi ~2.6) va duoi hop thut ve SAU. Art nen dat qua gan",
+    "    (z=-1.2 nhu ban dau) se CHE RUOT HOP. Vi vay 4 lop day xuong -8..-5.9. Camera ORTHO nen day z ra xa",
+    "    KHONG lam anh to/nho di — chi doi thu tu che nhau. Doi lai z thi doc boot log 'matSauZ=' de biet tran.",
     "  Bo 1 lop = xoa dong do (hoac doi res thanh chuoi rong).",
     "",
     "box: hop lo (mesh SKM_Box). w,h = khung cho hop chui vua (giu ti le, khong bop meo).",
     "  dx,dy = day hop lech so voi tam lo   rotX/rotY/rotZ = xoay (do)   scale = nhan them sau khi fit.",
+    "  dz    = day MAT TRUOC hop ra gan man hinh (world). Tran = 0.75 (nut CTA o z=1), vuot thi bi kep.",
+    "    Xoay rotX/rotY lam hop DAY THEM theo truc Z -> duoi hop thut ve sau, co the chui sau art nen va bi",
+    "    nen che ruot. Boot log in 'box: day= matTruocZ= matSauZ= -> art nen phai co z < X': ha z cua lop nen",
+    "    xuong duoi X la het. Camera ORTHO nen ha z KHONG lam anh nen to/nho di.",
     "  zScale = be day hop. MAT TRUOC hop luon ghim dung z cua lo (0.2), phan day do ve PHIA SAU -> hop",
     "    khong bao gio tho len truoc nut CTA (z=1). Giam zScale = hop det lai.",
+    "",
+    "anim: 4 clip skeletal cua hop (co san trong SKM_Box.fbx). enabled=false -> hop dung im nhu truoc.",
+    "  openOnHead   = mo nap khi lo len lam head cua cot (bat dau nhan hat)  [clip Open_box]",
+    "  fillOnHarvest= chay khi lo hut duoc hat (khong bam lai khi clip dang chay) [clip Fill]",
+    "  closeOnFull  = dong nap khi lo day, GIU pose cuoi                       [clip Close]",
+    "  idleBetween  = ve pose nghi giua 2 lan tren                             [clip Idle]",
+    "  closedWhenWaiting = lo CHUA toi luot dung o pose nap DONG (frame cuoi clip Close, khong phat clip)",
+    "  speed        = nhan toc do phat. Nghia 4 clip suy ra tu TEN, chua soi mat -> nhin sai thi TAT o day.",
     "",
     "SO MAC DINH lay tu Unity, khong dat tay: GameBoard.prefab (root scale 1.15, LevelSpawner dat tai",
     "0.025,17) + PPU 100 trong .meta. Doi chung: khungbangchuyen ra tam (0.025, 3.34) rong 18.45 trong khi",
@@ -19,10 +34,10 @@
   ],
 
   "board": [
-    { "res": "board/bg_ipad",         "x":  0.025, "y": 12.400, "w": 34.500, "h": 37.157, "z": -1.20 },
-    { "res": "board/Artboard",        "x":  0.025, "y": 17.000, "w": 24.840, "h": 49.680, "z": -1.00 },
-    { "res": "board/khungbangchuyen", "x":  0.025, "y":  3.338, "w": 18.446, "h":  6.820, "z": -0.90 },
-    { "res": "board/Bangchuyen2",     "x": -0.044, "y":  3.154, "w": 13.340, "h":  2.220, "z": -0.85 }
+    { "res": "board/bg_ipad",         "x":  0.025, "y": 19.100, "w": 53.475, "h": 57.59335, "z": -8.00 },
+    { "res": "board/Artboard",        "x":  0, "y": 17.000, "w": 24.840, "h": 49.680, "z": -7.00 },
+    { "res": "board/khungbangchuyen", "x":  0.025, "y":  3.338, "w": 18.446, "h":  6.820, "z": -6.00 },
+    { "res": "board/Bangchuyen2",     "x": -0.044, "y":  3.154, "w": 13.340, "h":  2.220, "z": -5.90 }
   ],
 
   "box": {
@@ -30,10 +45,21 @@
     "h": 2.6,
     "dx": 0,
     "dy": 0,
-    "rotX": 0,
+    "dz": 0,
+    "rotX": 45,
     "rotY": 0,
     "rotZ": 0,
-    "scale": 1,
+    "scale": 0.9,
     "zScale": 1
+  },
+
+  "anim": {
+    "enabled": true,
+    "speed": 1,
+    "openOnHead": true,
+    "fillOnHarvest": true,
+    "closeOnFull": true,
+    "idleBetween": true,
+    "closedWhenWaiting": true
   }
 }

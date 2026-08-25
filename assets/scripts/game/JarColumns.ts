@@ -74,6 +74,9 @@ class JarColumn {
     h.node.active = false;
     this.headIdx++;
     this.reposition();
+    // Head MỚI mở nắp ngay khi được đôn lên (không đợi tween dồn cột xong) — nó đã bắt đầu nhận hạt từ
+    // step này rồi, vùng hút của cột là CỐ ĐỊNH chứ không đi theo lọ.
+    this.head?.onBecomeHead();
   }
 
   /** Dồn mọi lọ CÒN SỐNG lên slot mới. Lọ tràn quá số slot đứng chồng ở slot cuối (khuất dưới đáy màn). */
@@ -103,6 +106,8 @@ export class JarColumns {
         s.jars[i].node.setWorldPosition(slot);
         s.jars[i].markMouthDirty();
       }
+      // Lọ slot 0 là head ngay từ frame đầu -> mở nắp luôn, cùng móc với lúc dồn cột.
+      if (s.jars.length > 0) s.jars[0].onBecomeHead();
     }
   }
 
