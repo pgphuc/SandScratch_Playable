@@ -14,6 +14,28 @@ export const ALL_NETWORKS: readonly NetworkId[] = [
   'applovin', 'meta', 'unityads', 'ironsource', 'mintegral', 'pangle',
 ];
 
+/**
+ * HỢP ĐỒNG VỚI PACKER — 1 BUILD DÙNG CHO 6 VARIANT.
+ *
+ * `AdRoot.network` là @property nên giá trị nằm serialize trong ad.scene: muốn 6 mạng thì phải sửa scene rồi
+ * build 6 lần — 6 lần cơ hội lệch nhau và 6 lần chờ build. Thay vào đó variant được quyết ở LỚP HTML: packer
+ * dán đúng 1 dòng `<script>window.__AD_NETWORK__="applovin"</script>` vào <head> trước khi engine chạy, nên
+ * 6 file HTML dùng CHUNG y hệt 1 payload game — khác nhau đúng 1 chuỗi + lớp SDK của mạng.
+ *
+ * Không có global (chạy preview trong editor) -> rơi về giá trị scene, nên preview vẫn dùng được như cũ.
+ * Chuỗi lạ (packer sai chính tả) -> cảnh báo + rơi về fallback, KHÔNG throw: chết ở đây là chết cả ad.
+ */
+export function resolveNetwork(fallback: string): NetworkId {
+  const injected = (globalThis as unknown as Record<string, unknown>).__AD_NETWORK__;
+  const raw = (typeof injected === 'string' && injected.length > 0) ? injected : fallback;
+  const id = raw.toLowerCase() as NetworkId;
+  if (ALL_NETWORKS.indexOf(id) < 0) {   // indexOf chu khong phai includes: lib TS cua Cocos khong co es2016
+    console.warn(`[NetworkAdapter] network id la "${raw}" — khong nam trong ${ALL_NETWORKS.join('|')}. Dung 'applovin'.`);
+    return 'applovin';
+  }
+  return id;
+}
+
 interface Mraid { open(url: string): void; }
 interface Dapi { openStoreUrl(url: string): void; }
 interface FbPlayableAd { onCTAClick(): void; }

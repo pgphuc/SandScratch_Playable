@@ -53,7 +53,8 @@ import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
 import { probeStatic, StallTracker, PixelProbe, probePoint, countGrainsNear, probePictureWindow } from './StaticProbe';
 import { ScenarioRunner, type ScenarioJson } from './ScenarioRunner';
-import type { NetworkId } from './NetworkAdapter';
+import { resolveNetwork } from './NetworkAdapter';
+import { DEBUG } from 'cc/env';
 
 const { ccclass, property } = _decorator;
 
@@ -167,7 +168,7 @@ export class AdRoot extends Component {
   network: string = 'applovin';
 
   @property({ tooltip: 'HUD debug góc trái trên (hạt sống / emit / lọ hút / rơi khỏi rig / % đang chạy). TẮT trước khi build P5.' })
-  debugHud = true;
+  debugHud = false;
 
   /**
    * A = port TS trung thực của solver Unity (PBD/DEM) — GIỮ TRỌN tuning nguồn, là bản chuẩn cho parity P6.
@@ -193,7 +194,7 @@ export class AdRoot extends Component {
    * TẮT trước build P5 như debugHud.
    */
   @property({ tooltip: 'In log phân loại hạt đứng im ra console (chẩn đoán). TẮT trước build P5.' })
-  staticProbe = true;
+  staticProbe = false;
 
   @property({ tooltip: 'Chu kỳ in log probe (giây)' })
   staticProbePeriod = 2;
@@ -204,7 +205,7 @@ export class AdRoot extends Component {
    * Lỗi mạng bị NUỐT có chủ ý: không có sink thì ad vẫn phải chạy y nguyên.
    */
   @property({ tooltip: 'URL sink nhận log probe (node tools/probe-sink.js). Rỗng = chỉ in console.' })
-  staticProbeSink = 'http://127.0.0.1:7799/';
+  staticProbeSink = '';
 
   /**
    * PHÍM P — chọc vào vị trí con trỏ: in ra chỗ đó CÓ GÌ và thứ ở đó có TỒN TẠI với hệ va chạm không.
@@ -314,8 +315,23 @@ export class AdRoot extends Component {
   // ==================================================================== khởi tạo
 
   onLoad(): void {
+    this.applyReleaseGuard();
     this.setupCamera();
     void this.boot();
+  }
+
+  /**
+   * CHỐT CỨNG cờ debug ở bản RELEASE. Cờ `DEBUG` của cc/env = true khi preview / build debug=true, false khi
+   * build debug=false (bản gửi network). Cờ debug là @property nên GIÁ TRỊ THẬT nằm serialize trong ad.scene —
+   * đổi default trong code KHÔNG ăn, và "nhớ bỏ tick trước khi build" là quy trình người, đã hụt 1 lần.
+   * Guard này bỏ hẳn khâu nhớ: bản release luôn tắt, bất kể scene tick gì. Preview vẫn tôn trọng tick.
+   */
+  private applyReleaseGuard(): void {
+    if (DEBUG) return;
+    this.debugHud = false;
+    this.staticProbe = false;
+    this.staticProbeSink = '';
+    this.showRigStandIn = false;
   }
 
   /** Nạp asset (bất đồng bộ) rồi dựng. Cờ `ready` gác `update()` để không chạy sim khi chưa có gì. */
@@ -672,7 +688,7 @@ export class AdRoot extends Component {
     this.runner = this.getComponent(ScenarioRunner) ?? this.addComponent(ScenarioRunner)!;
     this.runner.ctaNode = this.buildCta(json);
     this.runner.handHintNode = this.buildHandHint(json);
-    this.runner.init(json, this.network as NetworkId);
+    this.runner.init(json, resolveNetwork(this.network));
   }
 
   /** Tỉ lệ màn hình [0..1] gốc dưới-trái -> world (camera ortho, tâm (0, CAM_CENTER_Y)). */

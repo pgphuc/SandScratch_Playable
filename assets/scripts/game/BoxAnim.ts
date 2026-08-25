@@ -116,7 +116,7 @@ export interface BoxAnimTuning {
 }
 
 export const BOX_ANIM_DEFAULT: BoxAnimTuning = {
-  enabled: true, speed: 1, log: true,
+  enabled: true, speed: 1, log: false,
   openOnHead: true, fillEvery: 0.4, fillStopAfter: 0.25, fillOnHarvest: true, closeOnFull: true,
   idleBetween: false,
   waitingPose: 'none',

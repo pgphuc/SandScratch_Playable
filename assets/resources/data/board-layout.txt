@@ -112,7 +112,7 @@
   "anim": {
     "enabled": true,
     "speed": 1,
-    "log": true,
+    "log": false,
     "openOnHead": true,
     "fillOnHarvest": true,
     "fillEvery": 0.4,

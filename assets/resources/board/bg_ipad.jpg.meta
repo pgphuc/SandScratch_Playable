@@ -2,16 +2,16 @@
   "ver": "1.0.27",
   "importer": "image",
   "imported": true,
-  "uuid": "471db92e-b516-41e5-b10e-9d1157d88d7f",
+  "uuid": "6915c3b5-2d1a-4004-93cf-709eaa53c096",
   "files": [
-    ".json",
-    ".png"
+    ".jpg",
+    ".json"
   ],
   "subMetas": {
     "6c48a": {
       "importer": "texture",
-      "uuid": "471db92e-b516-41e5-b10e-9d1157d88d7f@6c48a",
-      "displayName": "2E2722",
+      "uuid": "6915c3b5-2d1a-4004-93cf-709eaa53c096@6c48a",
+      "displayName": "bg_ipad",
       "id": "6c48a",
       "name": "texture",
       "userData": {
@@ -22,7 +22,7 @@
         "mipfilter": "none",
         "anisotropy": 0,
         "isUuid": true,
-        "imageUuidOrDatabaseUri": "471db92e-b516-41e5-b10e-9d1157d88d7f",
+        "imageUuidOrDatabaseUri": "6915c3b5-2d1a-4004-93cf-709eaa53c096",
         "visible": false
       },
       "ver": "1.0.22",
@@ -37,6 +37,6 @@
     "type": "texture",
     "fixAlphaTransparencyArtifacts": false,
     "hasAlpha": false,
-    "redirect": "471db92e-b516-41e5-b10e-9d1157d88d7f@6c48a"
+    "redirect": "6915c3b5-2d1a-4004-93cf-709eaa53c096@6c48a"
   }
 }
