@@ -15,7 +15,8 @@
 // Renderer đồng bộ 1 lần/FRAME (không phải mỗi step): 2 step trong 1 frame ghi mesh 2 lần cho cùng 1 hình.
 
 import {
-  Asset, Camera, Canvas, Color, Component, EventTouch, Input, Label, Layers, Material, Node, Prefab, TextAsset,
+  Asset, Camera, Canvas, Color, Component, EventKeyboard, EventMouse, EventTouch, Input, KeyCode, Label, Layers,
+  Material, Node, Prefab, TextAsset,
   Texture2D, UITransform, Vec3, input, resources, view, _decorator,
 } from 'cc';
 
@@ -26,6 +27,7 @@ import {
   BeltFullGate, countBeltGrains, fillRatio, isInBeltLocal, mouthFromCenterSize, type BeltRegion,
 } from '../solver/counting';
 import type { GrainOccupancyField } from '../solver/occupancy';
+import { occEjectDiag, allocOccEjectDiag } from '../solver/occupancy';
 
 import {
   SAND_TUNING, RIG_LAYOUT, CONVEYOR_SHAPE, PICTURE_PIXEL_WORLD, makeConversionFrontConfig, grainPoolCapacity,
@@ -40,15 +42,16 @@ import { SandPictureHost } from './SandPictureHost';
 import { SandGrainRenderer } from './SandGrainRenderer';
 import { ColorJar } from './ColorJar';
 import { JarColumns, type JarColumnSpec } from './JarColumns';
-import { HandHint } from './HandHint';
+import { HandHint, HAND_STROKE_SEC, HAND_REST_SEC } from './HandHint';
 import { attachQuad } from './QuadVisual';
 import { attachBox, boxTextureName, lastBoxFit } from './BoxVisual';
 import { BoxAnim } from './BoxAnim';
+import { JarBurstVisual } from './JarBurstVisual';
 import { JarFillVisual } from './JarFillVisual';
 import { buildBoardVisual, parseBoardLayout, BOARD_DEFAULT, type BoardLayout } from './BoardVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
-import { probeStatic, StallTracker } from './StaticProbe';
+import { probeStatic, StallTracker, PixelProbe, probePoint, countGrainsNear, probePictureWindow } from './StaticProbe';
 import { ScenarioRunner, type ScenarioJson } from './ScenarioRunner';
 import type { NetworkId } from './NetworkAdapter';
 
@@ -111,18 +114,28 @@ const JAR_H = 2.6;
 //
 // ⚠ ĐÍNH CHÍNH note 91: "autoMouthSize 0.6×0.5" là DEFAULT trong ObiJarSink.cs, KHÔNG phải giá trị serialize
 // trên prefab. Số thật là 2.3×3.
-const JAR_MOUTH_OFFSET_Y = 4;
-const JAR_MOUTH_W = 2.3;
-const JAR_MOUTH_H = 3;
+//
+// 3 số đó GIỜ LÀ NÚM CHỈNH TAY: khối `mouth{}` trong assets/resources/data/board-layout.txt (mặc định
+// `MOUTH_DEFAULT` ở BoardVisual.ts giữ nguyên số nguồn). Bật `mouth.debug` để VẼ 4 hộp ra màn hình.
 
 /** z từng lớp — tranh phải Ở SAU hạt, nếu không pass transparent của tranh vẽ đè lên hạt opaque. */
 const Z_RIG = -0.2;        // rig ở SAU tranh: cát + tranh phải nằm trên khung
 const Z_PICTURE = -0.05;
 const Z_GRAIN = 0;
 const Z_JAR = 0.2;         // slot 0 (head). Slot dưới CỘNG thêm JAR_Z_STEP mỗi bậc -> nằm TRƯỚC head.
-const Z_JAR_FLY = 0.25;    // cung bay phải nằm TRƯỚC thân lọ HEAD, nếu không hạt chui vào sau lọ ở cuối cung
 const Z_HINT = 8;
+/** Cao bàn tay hint theo % CHIỀU CAO màn hình — núm `scenario.input.handHint.sizePct`. */
+const HAND_SIZE_PCT = 0.12;
+/**
+ * Đầu ngón trỏ trong `ui/hand.png`: [x từ trái, y từ TRÊN], tỉ lệ [0..1]. ĐO chứ không ước lượng — hàng pixel
+ * opaque trên cùng của art là y=29, khoảng x 62..70 trên ảnh 295x274. Đổi art -> đo lại, hoặc đặt `tipPct`.
+ */
+const HAND_TIP_PCT: [number, number] = [0.2237, 0.1058];
 const Z_CTA = 8;
+/** Khung hộp hút khi bật `mouth.debug`: TRƯỚC lọ (slot sâu nhất 4.2), SAU nút CTA (8). */
+const Z_MOUTH_DEBUG = 6;
+/** Chấm đỏ chẩn đoán phím P — trước mọi thứ trừ CTA để luôn nhìn thấy. */
+const Z_PROBE_MARKER = 7;
 /**
  * Trần của núm `box.dz` (board-layout.txt): mặt trước hộp SÂU NHẤT = Z_JAR + JAR_Z_STEP·(số slot−1) + dz,
  * phải luôn ở SAU nút CTA. Chừa 0.05 làm đệm để hộp không z-fight với CTA.
@@ -193,6 +206,15 @@ export class AdRoot extends Component {
   @property({ tooltip: 'URL sink nhận log probe (node tools/probe-sink.js). Rỗng = chỉ in console.' })
   staticProbeSink = 'http://127.0.0.1:7799/';
 
+  /**
+   * PHÍM P — chọc vào vị trí con trỏ: in ra chỗ đó CÓ GÌ và thứ ở đó có TỒN TẠI với hệ va chạm không.
+   * Đây là probe DUY NHẤT trả lời được sự kiện (2) user mô tả ("hạt khác đi xuyên qua như thể nó không tồn tại") —
+   * 3 probe kia đều đi hỏi "cái gì đang GIỮ nó" nên báo sạch trong khi bug còn nguyên. Xem khối probePoint cuối
+   * game/StaticProbe.ts. Đi kèm staticProbe: tắt staticProbe là tắt luôn phím P.
+   */
+  @property({ tooltip: 'Bán kính quét quanh con trỏ khi bấm P (world)' })
+  pointProbeRadius = 1.5;
+
   // --- state ---
   private level!: LoadedLevel;
   private map!: PictureMap;
@@ -205,6 +227,13 @@ export class AdRoot extends Component {
   private runner: ScenarioRunner | null = null;
   private jarColumns: JarColumns | null = null;
   private jarFly: JarFlyVisual | null = null;
+  /** Burst lúc lọ đầy (port Fb - Merge). */
+  private jarBurst: JarBurstVisual | null = null;
+  /** Art bàn tay hint (assets/resources/ui/hand.png = Tutorial/hand.png của nguồn). null -> chấm trắng như cũ. */
+  private handTex: Texture2D | null = null;
+  /** Texture VFX của nguồn: fx/smoke = T_Dust03, fx/flare = Flare02. Thiếu -> quad trơn, KHÔNG chặn boot. */
+  private smokeTex: Texture2D | null = null;
+  private flareTex: Texture2D | null = null;
   private gameCamera: Camera | null = null;
   /** Art nut CTA (assets/resources/ui/cta-button.png). null = chua co art -> ve placeholder mau. */
   private ctaTex: Texture2D | null = null;
@@ -258,6 +287,16 @@ export class AdRoot extends Component {
   private probeTimer = 0;
   /** Chỉ có khi staticProbe bật + mode A (đọc ccdDiag/predicted của SandSolver). */
   private stall: StallTracker | null = null;
+  /** Vị trí con trỏ gần nhất theo toạ độ UI (chuột HOẶC chạm) — phím P đọc chỗ này. NaN = chưa có. */
+  private pointerUiX = NaN;
+  private pointerUiY = NaN;
+  /** Cùng con trỏ đó nhưng theo pixel MÀN HÌNH — hệ mà camera.screenToWorld thật sự nhận. */
+  private pointerScX = NaN;
+  private pointerScY = NaN;
+  /** Chấm đỏ đánh dấu chỗ probe đang soi. Dựng lười ở lần bấm P đầu tiên. */
+  private probeMarker: Node | null = null;
+  /** Probe pixel tranh (ô Held/Solid cô lập, revert) — dòng `[pix]`, cùng nhịp probeStatic. */
+  private pixProbe: PixelProbe | null = null;
 
   // ---- belt-full gate + cửa trượt SDF (xem §BELT-FULL bên dưới) ----
   private beltGate: BeltFullGate | null = null;
@@ -281,15 +320,23 @@ export class AdRoot extends Component {
 
   /** Nạp asset (bất đồng bộ) rồi dựng. Cờ `ready` gác `update()` để không chạy sim khi chưa có gì. */
   private async boot(): Promise<void> {
-    const [levelTxt, scenarioTxt, grainMat, pictureMat, ctaTex] = await Promise.all([
+    const [levelTxt, scenarioTxt, grainMat, pictureMat, ctaTex, handTex, smokeTex, flareTex] = await Promise.all([
       loadRes(this.levelResPath, TextAsset),
       loadRes(this.scenarioResPath, TextAsset),
       loadRes('mat/grain', Material),
       loadRes('mat/picture', Material),
       // Art CTA la TUY CHON: thieu -> null -> quad mau nhu cu. Khong duoc chan boot vi mot cai nut.
       loadResOpt('ui/cta-button/texture', Texture2D),
+      // Art bàn tay hint — cũng TUỲ CHỌN: thiếu -> chấm trắng placeholder, không chặn boot.
+      loadResOpt('ui/hand/texture', Texture2D),
+      // VFX texture (copy từ Sand Drop Visualize/Textures/Effects). TUỲ CHỌN: thiếu -> quad trơn.
+      loadResOpt('fx/smoke/texture', Texture2D),
+      loadResOpt('fx/flare/texture', Texture2D),
     ]);
     this.ctaTex = ctaTex;
+    this.handTex = handTex;
+    this.smokeTex = smokeTex;
+    this.flareTex = flareTex;
 
     this.level = loadLevel(levelTxt.text);
 
@@ -327,6 +374,10 @@ export class AdRoot extends Component {
       this.solver.ccdDiag = new Uint8Array(cap);   // solver ghi cờ CCD per-hạt mỗi step, StallTracker đọc
       this.stall = new StallTracker(cap);
     }
+    if (this.staticProbe) this.pixProbe = new PixelProbe();
+    // Bật ghi chẩn đoán cú đẩy thoát occupancy — tắt probe là tắt luôn, đường nóng chỉ còn 1 phép so sánh.
+    occEjectDiag.on = this.staticProbe;
+    if (this.staticProbe) allocOccEjectDiag(cap);
     this.rig = buildSdfRig();
 
     this.occ = this.map.makeOccupancyField({
@@ -385,15 +436,32 @@ export class AdRoot extends Component {
       + `boxTex=[${texKeys.join(',')}] boxPath=${this.boxPrefabPath} ctaTex=${this.ctaTex !== null ? 'OK' : 'THIEU'} `
       + `board=${this.boardLayers}/${this.layout.board.length} layout=${this.layoutSource}`,
       `[boot] boxAnim: ${this.layout.anim.enabled ? 'BAT' : 'TAT'} loCoAnim=${this.jarsAnimated}/${this.level.jars.length} `
-      + `clip=[${this.boxAnimSlots}] speed=${this.layout.anim.speed}`,
+      + `clip=[${this.boxAnimSlots}] speed=${this.layout.anim.speed} waitingPose=${this.layout.anim.waitingPose}`,
       `[boot] box: day=${fit.depth.toFixed(2)} zSlot0=${Z_JAR.toFixed(2)} zSlotSau=${zDeep.toFixed(2)} `
       + `buocZ=${JAR_Z_STEP} dz=${this.layout.box.dz} matSauZ(slot0)=${(Z_JAR + fit.backLocalZ).toFixed(2)} `
       + `-> art nen phai co z < ${(Z_JAR + fit.backLocalZ).toFixed(2)} moi khong che ruot hop`,
       `[boot] fill: ${this.layout.fill.enabled ? 'BAT' : 'TAT'} khoi=${this.layout.fill.smoke ? 'BAT' : 'TAT'} `
       + `range=${this.layout.fill.range} ctaZ=${Z_CTA} tranDz=${MAX_BOX_DZ.toFixed(2)}`,
+      this.mouthBootLine(),
     ];
     for (const l of lines) console.log(l);
     this.sendProbe(lines);
+  }
+
+  /**
+   * Dòng boot in KHOẢNG THẬT của 4 hộp hút — con số phải đối chiếu khi soi "hạt kẹt nằm trong hộp không".
+   * In cả mép dải belt vẽ ra (`Bangchuyen2`) để thấy ngay hộp có thò ra ngoài dải belt hay không.
+   */
+  private mouthBootLine(): string {
+    const mt = this.layout.mouth;
+    const cy = JAR_SLOT_Y[0] + mt.offsetY;
+    const cols = this.jarColumns?.diag() ?? [];
+    const xs = cols.map((d) => `[${d.mouth.minX.toFixed(2)},${d.mouth.maxX.toFixed(2)}]`).join(' ');
+    const belt = this.layout.board.filter((L) => L.res.indexOf('Bangchuyen') >= 0)[0];
+    const beltTxt = belt !== undefined
+      ? `dai belt ve ra x=[${(belt.x - belt.w / 2).toFixed(2)},${(belt.x + belt.w / 2).toFixed(2)}]` : 'khong co lop belt';
+    return `[boot] mouth: offsetY=${mt.offsetY} w=${mt.w} h=${mt.h} debug=${mt.debug} `
+      + `-> y=[${(cy - mt.h / 2).toFixed(2)},${(cy + mt.h / 2).toFixed(2)}] x=${xs} | ${beltTxt}`;
   }
 
   // ==================================================================== dựng cây node
@@ -512,9 +580,12 @@ export class AdRoot extends Component {
   private buildJars(): void {
     const jarRoot = new Node('Jars');
     jarRoot.setParent(this.node);
+    // Burst dựng TRƯỚC lọ: handler onFull của từng lọ tham chiếu nó ngay lúc dựng.
+    this.jarBurst = new JarBurstVisual(this.node, this.layout.merge, this.flareTex);
 
     const headY = JAR_SLOT_Y[0];
-    const mouthCenterY = headY + JAR_MOUTH_OFFSET_Y;
+    const mt = this.layout.mouth;
+    const mouthCenterY = headY + mt.offsetY;
 
     const specs: JarColumnSpec[] = [];
     for (let c = 0; c < JAR_COLUMN_X.length; c++) {
@@ -523,9 +594,10 @@ export class AdRoot extends Component {
         jars: [],
         slots: JAR_SLOT_Y.map((y, i) => new Vec3(cx, y, Z_JAR + JAR_Z_STEP * i)),
         // Hộp RIÊNG từng cột — KHÔNG dùng chung 1 object, mỗi cột 1 bbox tại chỗ đứng của chính nó.
-        mouth: mouthFromCenterSize(cx, mouthCenterY, JAR_MOUTH_W, JAR_MOUTH_H),
+        mouth: mouthFromCenterSize(cx, mouthCenterY, mt.w, mt.h),
       });
     }
+    if (mt.debug) this.buildMouthDebug(specs, mouthCenterY);
 
     for (const spec of this.level.jars) {
       if (spec.column < 0 || spec.column >= specs.length) {
@@ -558,14 +630,41 @@ export class AdRoot extends Component {
       jar.setup(spec.colorName, cid, spec.capacity);
       // Mực cát + khói: dựng SAU setup để nó đọc được màu, và gắn vào node LỌ (không phải node hộp) — hộp bị
       // BoxVisual scale/xoay, treo mặt cát vào đó là mọi số tuning phải nhân ngược hệ số fit.
-      if (this.layout.fill.enabled) jar.fillVisual = new JarFillVisual(node, this.layout.fill, rgb);
+      if (this.layout.fill.enabled) {
+        // Mặt cát bám THÂN hộp ('Box/Spine'), KHÔNG bám nắp ('Box/Spine/Spine1') — bám nắp thì mực cát bật lên
+        // theo lúc mở nắp. Hộp không có anim -> null -> mặt cát đứng yên như bản trước.
+        const fillAnchor = jar.boxAnim !== null ? jar.boxAnim.socket('Box/Spine') : null;
+        jar.fillVisual = new JarFillVisual(node, this.layout.fill, rgb, this.smokeTex, fillAnchor);
+      }
       jar.node.active = !spec.hidden;
-      jar.onFull(() => this.runner?.notifyJarFull());
+      jar.onFull(() => {
+        // Nguồn: JarAnim.PlayEffectMerge = clip Close (ColorJar đã bấm) + burst Ps - Star Expolosion + pause.
+        this.jarBurst?.play(jar.node.worldPosition, hexToColor(rgb));
+        this.runner?.notifyJarFull();
+      });
       specs[spec.column].jars.push(jar);
     }
 
-    this.jarColumns = new JarColumns(specs);
-    this.jarFly = new JarFlyVisual(this.node, Z_JAR_FLY);
+    this.jarColumns = new JarColumns(specs, this.layout.merge.holdSec, this.layout.anim.log);
+    this.jarFly = new JarFlyVisual(this.node, this.layout.fly);
+  }
+
+  /**
+   * `mouth.debug` = VẼ 4 hộp hút ra màn hình (quad đỏ trong suốt). Chỉ để soi mắt "hạt kẹt nằm TRONG hay
+   * NGOÀI hộp hút" — hộp hút vốn vô hình nên nhìn không đoán được, mà đó chính là câu hỏi đang phải trả lời.
+   * Z nằm TRƯỚC lọ (slot sâu nhất 4.2) và SAU nút CTA (8) để không che nút.
+   */
+  private buildMouthDebug(specs: readonly JarColumnSpec[], centerY: number): void {
+    const root = new Node('MouthDebug');
+    root.setParent(this.node);
+    for (let c = 0; c < specs.length; c++) {
+      const m = specs[c].mouth;
+      const n = new Node(`mouth_${c}`);
+      n.setParent(root);
+      n.setPosition((m.minX + m.maxX) * 0.5, centerY, Z_MOUTH_DEBUG);
+      attachQuad(n, m.maxX - m.minX, m.maxY - m.minY, new Color(255, 40, 40, 70), null, true);
+    }
+    console.log(`[AdRoot] mouth.debug BAT — ve ${specs.length} hop hut o z=${Z_MOUTH_DEBUG}. TAT truoc P5.`);
   }
 
   private setupScenario(asset: TextAsset): void {
@@ -615,12 +714,38 @@ export class AdRoot extends Component {
     return node;
   }
 
+  /**
+   * Bàn tay hint. Art = `ui/hand.png` (chép từ `!_/UI/SDK_UI/Tutorial/hand.png` của nguồn, 295x274). Thiếu art
+   * -> chấm trắng 1.6 world y như bản trước.
+   *
+   * GHIM THEO ĐẦU NGÓN, KHÔNG PHẢI TÂM ẢNH: `HandHint` di chuyển node cha theo đường vuốt, còn quad art treo ở
+   * node CON lệch đi sao cho pixel đầu ngón trỏ rơi đúng vào điểm trên đường. Ghim tâm ảnh thì bàn tay chạy
+   * lệch nửa ảnh so với chỗ nó đang chỉ. Toạ độ đầu ngón đo từ alpha của chính file art
+   * (hàng opaque trên cùng y=29, giữa x=66 trên ảnh 295x274) -> núm `tipPct` nếu đổi art khác.
+   */
   private buildHandHint(json: ScenarioJson): Node {
+    const hh = json.input.handHint;
     const node = new Node('HandHint');
     node.setParent(this.node);
-    attachQuad(node, 1.6, 1.6, new Color(255, 255, 255, 210));
+
+    const halfH = this.gameCamera?.orthoHeight ?? CAM_HALF_HEIGHT;
+    const sizePct = hh.sizePct !== undefined && hh.sizePct > 0 ? hh.sizePct : HAND_SIZE_PCT;
+    const ratio = this.handTex !== null && this.handTex.height > 0
+      ? this.handTex.width / this.handTex.height : 1;
+    const h = this.handTex !== null ? sizePct * 2 * halfH : 1.6;
+    const w = h * ratio;
+
+    const art = new Node('HandArt');
+    art.setParent(node);
+    const tip = hh.tipPct ?? HAND_TIP_PCT;
+    // Ảnh không có art -> quad vuông ghim tâm (tip vô nghĩa với 1 chấm tròn).
+    if (this.handTex !== null) art.setPosition((0.5 - tip[0]) * w, (tip[1] - 0.5) * h, 0);
+    const tint = this.handTex !== null ? new Color(255, 255, 255, 255) : new Color(255, 255, 255, 210);
+    attachQuad(art, w, h, tint, this.handTex);
+
     const hint = node.addComponent(HandHint);
-    const path = json.input.handHint.path ?? [];
+    hint.setTiming(hh.strokeSec ?? HAND_STROKE_SEC, hh.restSec ?? HAND_REST_SEC);
+    const path = hh.path ?? [];
     hint.setPath(path.map((p) => this.screenRatioToWorld(p[0], p[1], Z_HINT)));
     node.active = false;
     return node;
@@ -762,6 +887,11 @@ export class AdRoot extends Component {
     input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
     input.on(Input.EventType.TOUCH_END, this.onTouchEnd, this);
     input.on(Input.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
+    // Phím P chỉ tồn tại khi probe bật -> build P5 (staticProbe=false) không đăng ký listener nào thừa.
+    if (this.staticProbe) {
+      input.on(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
+      input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+    }
   }
 
   onDisable(): void {
@@ -769,17 +899,116 @@ export class AdRoot extends Component {
     input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
     input.off(Input.EventType.TOUCH_END, this.onTouchEnd, this);
     input.off(Input.EventType.TOUCH_CANCEL, this.onTouchEnd, this);
+    input.off(Input.EventType.MOUSE_MOVE, this.onMouseMove, this);
+    input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
   }
 
   /** Chạm -> ô tranh. null nếu chưa dựng xong (không đoán toạ độ). */
   private cellOfTouch(e: EventTouch): { x: number; y: number } | null {
     if (!this.ready || this.gameCamera === null) return null;
     const loc = e.getUILocation();
+    this.pointerUiX = loc.x;
+    this.pointerUiY = loc.y;
+    const scl = e.getLocation();
+    this.pointerScX = scl.x;
+    this.pointerScY = scl.y;
     // z = 0: mặt phẳng gameplay. screenToWorld cần z trong khoảng near..far -> lấy khoảng cách camera tới z=0.
     this.tmpWorld.set(loc.x, loc.y, this.gameCamera.node.worldPosition.z);
     const w = this.gameCamera.screenToWorld(this.tmpWorld, this.tmpWorld);
     const c = this.map.worldToCell(w.x, w.y, { x: 0, y: 0 });
     return { x: Math.round(c.x), y: Math.round(c.y) };
+  }
+
+  private onMouseMove(e: EventMouse): void {
+    const ui = e.getUILocation();
+    this.pointerUiX = ui.x;
+    this.pointerUiY = ui.y;
+    // Toạ độ MÀN HÌNH thô (pixel). `camera.screenToWorld` nhận hệ NÀY, không phải hệ UI — hai hệ lệch nhau khi
+    // Canvas có tỉ lệ fit (design resolution ≠ khung thật). Giữ cả hai để phím P đối chiếu thay vì tin một cái.
+    const sc = e.getLocation();
+    this.pointerScX = sc.x;
+    this.pointerScY = sc.y;
+  }
+
+  /** Phím P = chọc vào vị trí con trỏ. Mọi phím khác bỏ qua (không nuốt input của ai). */
+  private onKeyDown(e: EventKeyboard): void {
+    if (e.keyCode !== KeyCode.KEY_P) return;
+    this.firePointProbe();
+  }
+
+  /** Quy 1 điểm (hệ bất kỳ) ra world trên mặt phẳng z=0. Trả null nếu chưa có camera. */
+  private toWorld(x: number, y: number, out: Vec3): Vec3 | null {
+    if (this.gameCamera === null) return null;
+    out.set(x, y, this.gameCamera.node.worldPosition.z);
+    return this.gameCamera.screenToWorld(out, out);
+  }
+
+  /**
+   * Chấm đánh dấu ĐỎ tại chỗ probe thực sự nhìn. Không có nó thì không cách nào biết "brute-force=0" nghĩa là
+   * chỗ đó rỗng thật hay là probe đang soi nhầm chỗ — chính chỗ đã làm 25 lần bấm P đầu tiên vô nghĩa.
+   */
+  private showProbeMarker(wx: number, wy: number): void {
+    if (this.probeMarker === null) {
+      this.probeMarker = new Node('ProbeMarker');
+      this.probeMarker.setParent(this.node);
+      attachQuad(this.probeMarker, 0.6, 0.6, new Color(255, 0, 0, 200));
+    }
+    this.probeMarker.setWorldPosition(wx, wy, Z_PROBE_MARKER);
+  }
+
+  /**
+   * Bắn 1 lát cắt tại vị trí con trỏ ra console + sink. Mọi nhánh không chạy được đều IN LÝ DO thay vì im lặng.
+   *
+   * IN CẢ HAI PHÉP QUY TOẠ ĐỘ (UI và MÀN HÌNH) kèm số hạt brute-force quanh mỗi điểm: bản v1 chỉ dùng hệ UI và
+   * quy con trỏ ra y≈15.85 trong khi TOÀN BỘ 824 hạt nằm dưới y=9.12 -> 24/25 lần bấm rơi vào chỗ trống, và tôi
+   * đã đọc nhầm "chỗ đó rỗng" thành "hạt không tồn tại". Hệ nào ra số hạt khớp mắt thì hệ đó đúng.
+   */
+  private firePointProbe(): void {
+    if (!this.staticProbe) return;
+    if (!this.ready || this.gameCamera === null) { console.log('[P] chua san sang (scene chua dung xong)'); return; }
+    if (!(this.solver instanceof SandSolver)) { console.log('[P] chi chay o solver mode A'); return; }
+    if (Number.isNaN(this.pointerUiX)) {
+      console.log('[P] chua biet vi tri con tro - di chuot vao khung game roi bam P lai');
+      return;
+    }
+    const wUi = this.toWorld(this.pointerUiX, this.pointerUiY, this.tmpWorld);
+    const uiX = wUi !== null ? wUi.x : NaN, uiY = wUi !== null ? wUi.y : NaN;
+    const wSc = this.toWorld(this.pointerScX, this.pointerScY, this.tmpWorld);
+    const scX = wSc !== null ? wSc.x : NaN, scY = wSc !== null ? wSc.y : NaN;
+
+    const pool = this.solver.pool;
+    const nearUi = countGrainsNear(pool, uiX, uiY, this.pointProbeRadius);
+    const nearSc = countGrainsNear(pool, scX, scY, this.pointProbeRadius);
+    const vs = view.getVisibleSize();
+    console.log(`[P] con tro: UI=(${this.pointerUiX.toFixed(0)},${this.pointerUiY.toFixed(0)}) `
+      + `-> world(${uiX.toFixed(2)},${uiY.toFixed(2)}) hat=${nearUi} | `
+      + `SCREEN=(${this.pointerScX.toFixed(0)},${this.pointerScY.toFixed(0)}) `
+      + `-> world(${scX.toFixed(2)},${scY.toFixed(2)}) hat=${nearSc} | visibleSize=${vs.width}x${vs.height}`);
+
+    // Điểm CHỌN: hệ nào tìm ra hạt thì lấy hệ đó; hoà thì giữ UI (hành vi cũ, để so được với log trước).
+    const useSc = nearSc > nearUi;
+    const wx = useSc ? scX : uiX, wy = useSc ? scY : uiY;
+    console.log(`[P] dung he ${useSc ? 'SCREEN' : 'UI'} -> (${wx.toFixed(2)},${wy.toFixed(2)})`);
+    this.showProbeMarker(wx, wy);
+
+    let root: Node = this.node;
+    while (root.parent !== null) root = root.parent;
+    const lines = probePoint(wx, wy, this.solver, this.solverParams.integrate, root,
+                             this.runner?.secondsElapsed ?? 0, this.pointProbeRadius);
+    // Trạng thái MESH đi cùng lô: pool nói có bao nhiêu hạt vs mesh đang thật sự vẽ bao nhiêu.
+    if (this.renderer !== null) lines.push(this.renderer.diag(this.solver.pool.count));
+    // ĐỌC THẲNG BUFFER ĐỈNH tại điểm probe. `diag` ở trên chỉ đếm index khai báo — không nói quad NÀO nằm ở đâu.
+    // Đây là mục tách được "chấm két nằm ở buffer CPU" với "chấm két chỉ còn trên GPU".
+    if (this.renderer !== null) {
+      const qs = this.renderer.probeQuad(wx, wy, this.pointProbeRadius, this.solver.pool);
+      for (let k = 0; k < qs.length; k++) lines.push(qs[k]);
+    }
+    // Ảnh chụp ô TRANH quanh con trỏ — dải tranh (y 10.8..31.2) không có hạt solver nào, nên thứ đứng im ở đó
+    // chỉ có thể là ô tranh chưa tan. Đây là mục trả lời đúng câu hỏi, các mục trên chỉ để loại trừ.
+    const win = probePictureWindow(wx, wy, this.host.model, this.tex, this.solverParams.integrate);
+    for (let k = 0; k < win.length; k++) lines.push(win[k]);
+    for (const l of lines) console.log(l);
+    this.sendProbe(lines);
   }
 
   private onTouchStart(e: EventTouch): void {
@@ -873,6 +1102,7 @@ export class AdRoot extends Component {
     this.tex.update(dt);
     this.jarColumns?.tickVisual(dt);
     this.jarFly?.tick(dt);
+    this.jarBurst?.tick(dt);
     if (this.renderer !== null) this.renderer.syncFromPool(this.solver.pool);
     if (this.debugHud) this.tickHud(dt);
     if (this.staticProbe) this.tickStaticProbe(dt);
@@ -884,10 +1114,15 @@ export class AdRoot extends Component {
     const period = Math.max(0.25, this.staticProbePeriod);
     if (this.probeTimer < period) return;
     this.probeTimer = 0;
-    const lines = probeStatic(this.solver.pool, this.solverParams.integrate);
+    const lines = probeStatic(this.solver.pool, this.solverParams.integrate, this.jarColumns?.diag() ?? null);
     if (this.stall !== null) {
       const pin = this.stall.flush();
       for (let k = 0; k < pin.length; k++) lines.push(pin[k]);
+    }
+    if (this.pixProbe !== null) {
+      const pix = this.pixProbe.scan(this.host.model, this.tex, this.host.map, this.host,
+                                     this.runner?.secondsElapsed ?? 0);
+      for (let k = 0; k < pix.length; k++) lines.push(pix[k]);
     }
     for (const l of lines) console.log(l);
     this.sendProbe(lines);
@@ -1107,8 +1342,9 @@ export class AdRoot extends Component {
     const nBeforeHarvest = this.solver.pool.count;
     this.jarColumns?.harvest(this.solver.pool, (jar) => {
       // lastHarvested CHỈ hợp lệ ngay sau harvest của chính lọ đó -> đọc trong callback, không gom lại sau.
-      this.jarFly?.spawnFrom(jar.lastHarvested, jar.node.worldPosition,
-                             hexToColor(hexOfColorName(jar.colorName)));
+      // Truyền NODE lọ (không phải toạ độ chụp lúc bắn): nguồn đọc đích LIVE mỗi tick nên hạt bám theo lọ
+      // đang tween dồn cột.
+      this.jarFly?.spawnFrom(jar.lastHarvested, jar.node, hexToColor(hexOfColorName(jar.colorName)));
     });
     this.harvestedTotal += nBeforeHarvest - this.solver.pool.count;
   }

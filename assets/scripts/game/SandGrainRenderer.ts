@@ -50,6 +50,10 @@ export class SandGrainRenderer extends Component {
    * lý thuyết" là thứ đã làm hỏng 3 phiên đo — nên dọn thẳng: bán kính 0 = quad suy biến = vô hình.
    */
   private highWater = 0;
+  /** Tầm quad đang được ĐẨY sang GPU (>= viewCount). Xem rebuildViews. */
+  private viewUpload = -1;
+  /** Quad đã ép r=0 ở CPU mà chưa kịp upload (frame pool rỗng) -> phải phủ vào tầm upload frame sau. */
+  private pendingHigh = 0;
   private geom: primitives.IDynamicGeometry | null = null;
   private radiusAttr!: gfx.Attribute;
 
@@ -145,8 +149,9 @@ export class SandGrainRenderer extends Component {
 
     // DỌN ĐUÔI: quad của hạt vừa bị hút/kill vẫn còn tâm+bán kính cũ trong buffer -> ép bán kính 0 để dù có lọt
     // vào vùng vẽ cũng không ra hình. Chỉ chạy đúng phần vừa co lại, không quét cả capacity.
-    if (n < this.highWater) {
-      for (let q = n; q < this.highWater; q++) {
+    const prevHigh = this.highWater;
+    if (n < prevHigh) {
+      for (let q = n; q < prevHigh; q++) {
         const v = q * VERTS_PER_QUAD;
         for (let k = 0; k < VERTS_PER_QUAD; k++) R[(v + k) * 2] = 0;
       }
@@ -155,12 +160,20 @@ export class SandGrainRenderer extends Component {
 
     if (n === 0) {
       // Mesh rỗng: KHÔNG updateSubMesh với 0 đỉnh (một số backend coi là lỗi) — ẩn renderer là đủ và rẻ hơn.
+      // Số 0 vừa ghi cho [0, prevHigh) CHƯA lên được GPU (không upload frame này) -> nợ lại cho frame sau.
+      this.pendingHigh = Math.max(this.pendingHigh, prevHigh);
       this.renderer.enabled = false;
       return;
     }
     this.renderer.enabled = true;
 
-    if (n !== this.viewCount) this.rebuildViews(n);
+    // TẦM UPLOAD phải phủ tới quad ĐUÔI vừa bị ép r=0, nếu không số 0 đó chỉ nằm trong RAM.
+    // (Bug thật 2026-08-25: dọn đuôi ghi R[q] = 0 với q >= n = GHI NGOÀI subarray đang upload -> GPU giữ nguyên
+    //  bán kính 0.12 + toạ độ cũ -> "xác quad" của hạt đã rời pool vẫn lên hình, đứng im, hạt khác xuyên qua.
+    //  Đo được bằng probeQuad: 32/32 quad tại chỗ chấm két đều q>=n và r=0.000 trong buffer CPU.)
+    // Số index vẽ vẫn giữ ở n -> KHÔNG mở rộng draw call, chỉ mở rộng vùng dữ liệu được đẩy sang GPU.
+    const upload = Math.min(this.capacity, Math.max(n, prevHigh, this.pendingHigh));
+    if (n !== this.viewCount || upload !== this.viewUpload) this.rebuildViews(n, upload);
     const g = this.geom!;
     g.minPos = { x: minX, y: minY, z: -0.5 };
     g.maxPos = { x: maxX, y: maxY, z: 0.5 };
@@ -175,6 +188,7 @@ export class SandGrainRenderer extends Component {
     } else {
       this.mesh.updateSubMesh(0, g);
     }
+    this.pendingHigh = 0;   // dữ liệu đuôi đã sang GPU
   }
 
   /**
@@ -233,16 +247,23 @@ export class SandGrainRenderer extends Component {
     return out;
   }
 
-  /** Cắt view theo count. Chỉ chạy khi count ĐỔI -> không cấp phát ở frame ổn định. */
-  private rebuildViews(n: number): void {
-    this.viewCount = n;
-    const verts = n * VERTS_PER_QUAD;
+  /**
+   * Cắt view. HAI tầm khác nhau, cố ý:
+   *   nDraw   = số quad ĐƯỢC VẼ  -> quyết định indices16 (draw call).
+   *   nUpload = số quad ĐƯỢC ĐẨY -> quyết định positions/colors/radii (dữ liệu sang GPU).
+   * nUpload >= nDraw để số 0 của vòng dọn đuôi thật sự tới GPU. Đỉnh thừa không được index nào trỏ tới nên
+   * không vẽ ra gì — chỉ tốn băng thông đúng phần vừa co lại.
+   */
+  private rebuildViews(nDraw: number, nUpload: number): void {
+    this.viewCount = nDraw;
+    this.viewUpload = nUpload;
+    const verts = nUpload * VERTS_PER_QUAD;
     this.geom = {
       positions: this.positions.subarray(0, verts * 3),
       uvs: this.uvs.subarray(0, verts * 2),
       colors: this.colors.subarray(0, verts * 4),
       customAttributes: [{ attr: this.radiusAttr, values: this.radii.subarray(0, verts * 2) }],
-      indices16: this.indices.subarray(0, n * INDICES_PER_QUAD),
+      indices16: this.indices.subarray(0, nDraw * INDICES_PER_QUAD),
     };
   }
 }

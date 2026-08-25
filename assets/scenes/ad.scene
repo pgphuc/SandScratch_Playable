@@ -118,6 +118,7 @@
     "scenarioResPath": "data/scenario",
     "boardLayoutResPath": "data/board-layout",
     "brushRadiusCells": 10,
+    "swipeEmptyStampsToClose": 1,
     "network": "applovin",
     "debugHud": true,
     "solverMode": "A",
@@ -125,6 +126,7 @@
     "staticProbe": true,
     "staticProbePeriod": 2,
     "staticProbeSink": "http://127.0.0.1:7799/",
+    "pointProbeRadius": 1.5,
     "_id": "ad-comp-adroot"
   },
   {

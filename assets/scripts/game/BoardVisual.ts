@@ -28,8 +28,10 @@
 
 import { Color, Node, Texture2D } from 'cc';
 import { attachQuad } from './QuadVisual';
-import { BOX_ANIM_DEFAULT, type BoxAnimTuning } from './BoxAnim';
+import { BOX_ANIM_DEFAULT, WAITING_POSES, type BoxAnimTuning, type WaitingPose } from './BoxAnim';
 import { JAR_FILL_DEFAULT, type JarFillTuning } from './JarFillVisual';
+import { JAR_FLY_DEFAULT, type JarFlyTuning } from './JarFlyVisual';
+import { JAR_MERGE_DEFAULT, type JarMergeTuning } from './JarBurstVisual';
 
 /** 1 lớp art nền, ĐÃ quy về world — đúng 6 số mà file board-layout.txt cho chỉnh. */
 export interface BoardLayer {
@@ -56,6 +58,24 @@ export interface BoxTuning {
   zScale: number;
 }
 
+/**
+ * Núm HỘP HÚT (port `ObiJarSink`) — vùng NHẬN HẠT của mỗi cột. ⚠ KHÔNG phải chỗ đứng của lọ: nguồn đặt hộp ở
+ * RÃNH ĐÁY BELT, cách tâm head jar 4 world LÊN TRÊN; lọ chỉ là đích của cung bay visual.
+ * Hạt ĐÚNG MÀU head của cột + cột CÒN CHỖ mới bị hút; hạt KHÁC MÀU nằm trong hộp thì cứ nằm đó.
+ */
+export interface MouthTuning {
+  /** Tâm hộp = tâm HEAD JAR + offsetY (world). Nguồn `autoMouthOffset = (0, 4, 0)`. */
+  offsetY: number;
+  /** Cỡ hộp (world). Nguồn `autoMouthSize = (2.3, 3)` — số SERIALIZE trên prefab, KHÔNG phải default trong .cs. */
+  w: number;
+  h: number;
+  /** Vẽ khung hộp hút ra màn hình để soi mắt: hạt kẹt nằm TRONG hay NGOÀI hộp. TẮT trước P5. */
+  debug: boolean;
+}
+
+/** Số nguồn từ prefab `Game Specifics` §ObiJarSink. Khai TRƯỚC BOARD_DEFAULT vì bị dùng ngay trong đó. */
+export const MOUTH_DEFAULT: MouthTuning = { offsetY: 4, w: 2.3, h: 3, debug: false };
+
 export interface BoardLayout {
   board: BoardLayer[];
   box: BoxTuning;
@@ -63,6 +83,12 @@ export interface BoardLayout {
   anim: BoxAnimTuning;
   /** Mực cát dâng + khói khi lọ nhận cát — xem JarFillVisual.ts. */
   fill: JarFillTuning;
+  /** Cung bay của hạt từ rãnh belt vào lọ (port ObiJarSink) — xem JarFlyVisual.ts. */
+  fly: JarFlyTuning;
+  /** Burst + thời gian nán lại lúc lọ ĐẦY (port Fb - Merge) — xem JarBurstVisual.ts. */
+  merge: JarMergeTuning;
+  /** Hộp hút của từng cột (port ObiJarSink) — xem MouthTuning. */
+  mouth: MouthTuning;
 }
 
 /** Rơi về đây khi board-layout.txt thiếu/hỏng. Số y hệt bản trong file JSON. */
@@ -76,6 +102,9 @@ export const BOARD_DEFAULT: BoardLayout = {
   box: { w: 3.6, h: 2.6, dx: 0, dy: 0, dz: 0, rotX: 0, rotY: 0, rotZ: 0, scale: 1, zScale: 1 },
   anim: BOX_ANIM_DEFAULT,
   fill: JAR_FILL_DEFAULT,
+  fly: JAR_FLY_DEFAULT,
+  merge: JAR_MERGE_DEFAULT,
+  mouth: MOUTH_DEFAULT,
 };
 
 const num = (v: unknown, fallback: number): number => (typeof v === 'number' && isFinite(v) ? v : fallback);
@@ -91,6 +120,9 @@ export function parseBoardLayout(text: string): BoardLayout {
   const box = (raw.box ?? {}) as Partial<BoxTuning>;
   const anim = (raw.anim ?? {}) as Partial<BoxAnimTuning>;
   const fill = (raw.fill ?? {}) as Partial<JarFillTuning>;
+  const fly = (raw.fly ?? {}) as Partial<JarFlyTuning>;
+  const merge = (raw.merge ?? {}) as Partial<JarMergeTuning>;
+  const mouth = (raw.mouth ?? {}) as Partial<MouthTuning>;
   const layers = Array.isArray(raw.board) ? raw.board : d.board;
   return {
     board: layers
@@ -111,11 +143,15 @@ export function parseBoardLayout(text: string): BoardLayout {
     anim: {
       enabled: bool(anim.enabled, d.anim.enabled),
       speed: num(anim.speed, d.anim.speed),
+      log: bool(anim.log, d.anim.log),
       openOnHead: bool(anim.openOnHead, d.anim.openOnHead),
+      fillEvery: num(anim.fillEvery, d.anim.fillEvery),
+      fillStopAfter: num(anim.fillStopAfter, d.anim.fillStopAfter),
       fillOnHarvest: bool(anim.fillOnHarvest, d.anim.fillOnHarvest),
       closeOnFull: bool(anim.closeOnFull, d.anim.closeOnFull),
       idleBetween: bool(anim.idleBetween, d.anim.idleBetween),
-      closedWhenWaiting: bool(anim.closedWhenWaiting, d.anim.closedWhenWaiting),
+      waitingPose: WAITING_POSES.indexOf(anim.waitingPose as WaitingPose) >= 0
+        ? (anim.waitingPose as WaitingPose) : d.anim.waitingPose,
     },
     fill: {
       enabled: bool(fill.enabled, d.fill.enabled),
@@ -129,6 +165,47 @@ export function parseBoardLayout(text: string): BoardLayout {
       smokeLife: num(fill.smokeLife, d.fill.smokeLife),
       smokeRise: num(fill.smokeRise, d.fill.smokeRise),
       smokeSpread: num(fill.smokeSpread, d.fill.smokeSpread),
+      smokeAlpha: num(fill.smokeAlpha, d.fill.smokeAlpha),
+      smokeWhite: num(fill.smokeWhite, d.fill.smokeWhite),
+      smokeDx: num(fill.smokeDx, d.fill.smokeDx),
+      smokeDy: num(fill.smokeDy, d.fill.smokeDy),
+      smokeFollowFill: bool(fill.smokeFollowFill, d.fill.smokeFollowFill),
+    },
+    fly: {
+      enabled: bool(fly.enabled, d.fly.enabled),
+      size: num(fly.size, d.fly.size),
+      landOffsetX: num(fly.landOffsetX, d.fly.landOffsetX),
+      landOffsetY: num(fly.landOffsetY, d.fly.landOffsetY),
+      landOffsetZ: num(fly.landOffsetZ, d.fly.landOffsetZ),
+      jumpPower: num(fly.jumpPower, d.fly.jumpPower),
+      jumpPeakFrac: num(fly.jumpPeakFrac, d.fly.jumpPeakFrac),
+      jumpDuration: num(fly.jumpDuration, d.fly.jumpDuration),
+      jumpPowerJitter: num(fly.jumpPowerJitter, d.fly.jumpPowerJitter),
+      jumpDurationJitter: num(fly.jumpDurationJitter, d.fly.jumpDurationJitter),
+      landBandWidth: num(fly.landBandWidth, d.fly.landBandWidth),
+      landSpread: num(fly.landSpread, d.fly.landSpread),
+      arcLanes: num(fly.arcLanes, d.fly.arcLanes),
+      arcLaneSpread: num(fly.arcLaneSpread, d.fly.arcLaneSpread),
+      arcLaneJitter: num(fly.arcLaneJitter, d.fly.arcLaneJitter),
+      capacity: num(fly.capacity, d.fly.capacity),
+      sampleEvery: num(fly.sampleEvery, d.fly.sampleEvery),
+    },
+    merge: {
+      enabled: bool(merge.enabled, d.merge.enabled),
+      holdSec: num(merge.holdSec, d.merge.holdSec),
+      count: num(merge.count, d.merge.count),
+      size: num(merge.size, d.merge.size),
+      sizeEnd: num(merge.sizeEnd, d.merge.sizeEnd),
+      life: num(merge.life, d.merge.life),
+      speed: num(merge.speed, d.merge.speed),
+      gravity: num(merge.gravity, d.merge.gravity),
+      spin: num(merge.spin, d.merge.spin),
+      white: num(merge.white, d.merge.white),
+    },
+    mouth: {
+      offsetY: num(mouth.offsetY, d.mouth.offsetY),
+      w: num(mouth.w, d.mouth.w), h: num(mouth.h, d.mouth.h),
+      debug: bool(mouth.debug, d.mouth.debug),
     },
   };
 }
