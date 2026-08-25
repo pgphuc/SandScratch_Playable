@@ -49,6 +49,12 @@ export class ColorJar extends Component {
    * anim bị tắt trong board-layout.txt -> mọi lời gọi ở dưới thành no-op, logic lọ KHÔNG đổi.
    */
   boxAnim: BoxAnim | null = null;
+  /**
+   * Clip collapse (lọ đầy) ĐÃ chạy xong -> JarColumns được phép tắt lọ. Không có anim/clip thì BoxAnim.close
+   * gọi callback ngay, cờ bật cùng frame với markFull (hành vi cũ: tắt theo đồng hồ).
+   */
+  private closeDoneValue = false;
+  get closeAnimDone(): boolean { return this.closeDoneValue; }
   /** Mực cát dâng + khói (JarFillVisual). null = tắt trong board-layout.txt -> mọi lời gọi thành no-op. */
   fillVisual: JarFillVisual | null = null;
   private readonly baseScale = new Vec3(1, 1, 1);
@@ -60,6 +66,11 @@ export class ColorJar extends Component {
   get isFull(): boolean { return this.fullValue; }
   /** 0..1. capacity <= 0 -> 0 (không chia cho 0). */
   get fillRatio(): number { return this.capacity > 0 ? this.filledValue / this.capacity : 0; }
+  /**
+   * Pixel CÒN NHẬN ĐƯỢC lượt này = đúng hạn ngạch `harvestWithMouth` truyền cho `harvestJar`.
+   * 0 = đầy (hoặc đang nán chờ clip đóng) -> hạt ĐÚNG MÀU nằm trong hộp hút cũng KHÔNG bị hút, cứ nằm đó.
+   */
+  get room(): number { return this.fullValue ? 0 : Math.max(0, this.capacity - this.filledValue); }
 
   onLoad(): void {
     this.baseScale.set(this.node.scale);
@@ -146,7 +157,11 @@ export class ColorJar extends Component {
     this.fullValue = true;
     this.filledValue = this.capacity;
     this.playFullBurst();
-    this.boxAnim?.close();
+    // Nguồn: `PlayAnimCollapse` gắn `state.Events.OnEnd` rồi mới Destroy lọ. Ở đây cũng vậy: anim báo xong
+    // thì JarColumns mới tắt lọ, không tắt theo đồng hồ.
+    this.closeDoneValue = false;
+    if (this.boxAnim !== null) this.boxAnim.close(() => { this.closeDoneValue = true; });
+    else this.closeDoneValue = true;
     this.fillVisual?.setProgress(1);
     // Handler có thể đọc/ghi state khác -> gọi SAU khi đã chốt fullValue, để re-entrancy không lật cờ lại.
     for (let i = 0; i < this.onFullHandlers.length; i++) this.onFullHandlers[i](this);
@@ -176,6 +191,7 @@ export class ColorJar extends Component {
 
   /** Reset cho ScenarioRunner replay. */
   reset(): void {
+    this.closeDoneValue = false;
     this.boxAnim?.reset();
     this.fillVisual?.reset();
     this.punch?.stop();
