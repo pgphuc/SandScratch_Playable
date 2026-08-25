@@ -48,7 +48,7 @@ import { JarFillVisual } from './JarFillVisual';
 import { buildBoardVisual, parseBoardLayout, BOARD_DEFAULT, type BoardLayout } from './BoardVisual';
 import { buildRigVisual } from './RigVisual';
 import { JarFlyVisual } from './JarFlyVisual';
-import { probeStatic } from './StaticProbe';
+import { probeStatic, StallTracker } from './StaticProbe';
 import { ScenarioRunner, type ScenarioJson } from './ScenarioRunner';
 import type { NetworkId } from './NetworkAdapter';
 
@@ -175,6 +175,8 @@ export class AdRoot extends Component {
   /**
    * Probe CHẨN ĐOÁN hạt đứng im (game/StaticProbe.ts) — in ra console mỗi `staticProbePeriod` giây, phân loại
    * hạt tĩnh theo THỨ ĐANG GIỮ NÓ (rig / occupancy tranh / ghost / lơ lửng thật). Chỉ đọc, không sửa gì.
+   * Bật thêm StallTracker (dòng `[pin]`, mode A): theo dõi TỪNG SIM STEP để bắt khựng ngắn 3-10 step mà probe
+   * 2s/lần bỏ sót; cấp `solver.ccdDiag` để biết hạt có bị CCD kẹp ở step đó không.
    * TẮT trước build P5 như debugHud.
    */
   @property({ tooltip: 'In log phân loại hạt đứng im ra console (chẩn đoán). TẮT trước build P5.' })
@@ -254,6 +256,8 @@ export class AdRoot extends Component {
   private hudLabel: Label | null = null;
   private hudTimer = 0;
   private probeTimer = 0;
+  /** Chỉ có khi staticProbe bật + mode A (đọc ccdDiag/predicted của SandSolver). */
+  private stall: StallTracker | null = null;
 
   // ---- belt-full gate + cửa trượt SDF (xem §BELT-FULL bên dưới) ----
   private beltGate: BeltFullGate | null = null;
@@ -319,6 +323,10 @@ export class AdRoot extends Component {
     this.solver = this.solverMode.toUpperCase() === 'B' ? new SandCellSolver() : new SandSolver();
     const cap = grainPoolCapacity();
     this.solver.alloc(cap);
+    if (this.staticProbe && this.solver instanceof SandSolver) {
+      this.solver.ccdDiag = new Uint8Array(cap);   // solver ghi cờ CCD per-hạt mỗi step, StallTracker đọc
+      this.stall = new StallTracker(cap);
+    }
     this.rig = buildSdfRig();
 
     this.occ = this.map.makeOccupancyField({
@@ -877,6 +885,10 @@ export class AdRoot extends Component {
     if (this.probeTimer < period) return;
     this.probeTimer = 0;
     const lines = probeStatic(this.solver.pool, this.solverParams.integrate);
+    if (this.stall !== null) {
+      const pin = this.stall.flush();
+      for (let k = 0; k < pin.length; k++) lines.push(pin[k]);
+    }
     for (const l of lines) console.log(l);
     this.sendProbe(lines);
   }
@@ -1087,6 +1099,10 @@ export class AdRoot extends Component {
     const nBeforeStep = this.solver.pool.count;
     this.lastRespawned = this.solver.step(this.solverParams);
     this.killedTotal += nBeforeStep - this.solver.pool.count;
+    // TRƯỚC harvest: harvest swap-remove làm index lệch khỏi ccdDiag/predicted của step này.
+    if (this.stall !== null && this.solver instanceof SandSolver) {
+      this.stall.tick(this.solver, this.solverParams.integrate, this.runner?.secondsElapsed ?? 0);
+    }
 
     const nBeforeHarvest = this.solver.pool.count;
     this.jarColumns?.harvest(this.solver.pool, (jar) => {

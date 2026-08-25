@@ -37,13 +37,13 @@ export const SAND_TUNING = {
   grainContactAbsorbCapMul: 2,
   grainContactSettleDamping: 0,
 
-  // --- friction / sleep ---
+  // --- friction ---
+  // SLEEP KHÔNG TỒN TẠI trong solver này (gỡ hẳn 2026-08-24, commit 564bf50 bên Cocos): nguồn Unity luôn tắt
+  // (ir/tuning.json grainSleepEnabled=false) nên 3 knob grainSleep* đã bị xoá khỏi đây — có knob mà không có
+  // consumer chỉ khiến người sau tưởng bật/tắt được. Muốn sleep = revert commit đó, không phải thêm knob lại.
   grainFrictionVelocity: 8,
   grainFrictionSurfaceDrag: 1,
   grainFrictionPosMu: 0,
-  grainSleepEnabled: false,
-  grainSleepQuadrant: true,
-  grainSleepDelaySeconds: 1,
 
   // --- belt (bang chuyen) — nguon ir/tuning.json configs.5.data, KHONG nhan geomScale ---
   // velocity giu WORLD suot vong integrate (integrate.ts dong 118) va tangent da doi sang world roi normalize,

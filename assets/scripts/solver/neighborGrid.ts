@@ -6,7 +6,7 @@
 
 export const MAX_DIM = 512;        // trần mỗi chiều (ô). Hạt ngoài trần bị KẸP về ô biên (an toàn: consumer test khoảng cách).
 export const MAX_SUBDIV = 4;       // trần subdiv m (cellSize = 2r/m)
-export const TALLY_SLACK = 1.1;    // slack của Tally (quadrant-sleep) — HẰNG SỐ CHUNG với FinalizeJob bên nguồn
+export const TALLY_SLACK = 1.1;    // slack của Tally bên nguồn (dùng cho quadrant-sleep — cơ chế KHÔNG port; giữ hằng để grid parity)
 export const MAX_CELLS = MAX_DIM * MAX_DIM;
 
 /** Hình học lưới — build job ghi 1 lần, consumer đọc 1 lần đầu vòng. */

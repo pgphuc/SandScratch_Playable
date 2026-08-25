@@ -167,7 +167,8 @@ function resolveContainment(pos: V2, vel: V2, sdt: number, pPrev: V2, p: Integra
 
   // Belt vortex CCW: chỉ hạt đã trong bbox ring stadium.
   // TRẦN theo DẤU CHÂN MIỆNG PHỄU: trong |lp.x|<=wallX khi cửa ĐÓNG, trần hạ xuống doorY (gapBeltTopY) -> lớp crest
-  // DƯỚI miệng phễu KHÔNG nhận vortex nữa -> đứng yên -> ngủ được. Cửa VẬT LÝ vẫn chỉ rộng gapHalf; đây là vùng
+  // DƯỚI miệng phễu KHÔNG nhận vortex nữa -> đứng yên (bên nguồn còn để sleep ăn; bản này KHÔNG có sleep, hạt chỉ
+  // hết bị khuấy). Cửa VẬT LÝ vẫn chỉ rộng gapHalf; đây là vùng
   // HẠ-TRẦN vortex, phải rộng bằng đống nên dùng wallX (gapHalf hụt bề ngang -> vai đống vẫn vortex -> churn).
   const beltTopHere = Math.abs(_lp.x) <= sdf.wallX ? p.gapBeltTopY : sdf.beltTopY;
   if (Math.abs(_lp.x) <= sdf.beltHalfX && _lp.y <= beltTopHere && _lp.y >= -sdf.beltTopY) {
@@ -249,8 +250,8 @@ function resolveContainment(pos: V2, vel: V2, sdt: number, pPrev: V2, p: Integra
 /**
  * 1 step integrate cho [0..count). SoA: positions/velocities/posPredicted stride 2; ghost là Uint8Array.
  *
- * Hạt NGỦ: KHÔNG integrate, nhưng PHẢI ghi posPredicted=pos để finalize suy corr=0 (không thì corr = pos -
- * posPredicted_cũ = rác). Vẫn vào lưới neighbor làm VẬT CẢN cho hạt thức.
+ * KHÔNG có nhánh "hạt ngủ bỏ integrate": sleep đã gỡ khỏi solver (2026-08-24), MỌI hạt đều integrate mỗi step và
+ * posPredicted luôn = pos cuối integrate. (Nguồn Unity có nhánh asleep -> ghi posPredicted=pos; bản này không cần.)
  */
 export function integrate(positions: Float32Array, velocities: Float32Array, posPredicted: Float32Array,
                           ghost: Uint8Array, ghostReleaseY: Float32Array,

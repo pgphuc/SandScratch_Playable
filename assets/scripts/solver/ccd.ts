@@ -19,7 +19,7 @@
 
 import { rowSpan, type GrainCellGrid, type Span } from './neighborGrid';
 
-/** Cờ ĐO per-hạt: 0 = early-out (ngủ / bước <= gate) · 1 = có quét ô mà không chạm · 2 = có KẸP. */
+/** Cờ ĐO per-hạt: 0 = early-out (bước <= gate) · 1 = có quét ô mà không chạm · 2 = có KẸP. */
 export const CCD_DIAG_EARLY_OUT = 0;
 export const CCD_DIAG_SWEPT = 1;
 export const CCD_DIAG_CLAMPED = 2;

@@ -9,7 +9,7 @@
 // knob>0" đều là gate của nguồn (tắt = mảng liên quan không bị đọc, và hành vi rút về bản trước feature đó).
 //
 // ⚠ THỨ TỰ LÀ MỘT PHẦN CỦA KẾT QUẢ, không phải chi tiết cài đặt:
-// - lưới neighbor build SAU integrate (pos đã dịch) và dùng CHUNG cho ccd/contact/friction/sleep;
+// - lưới neighbor build SAU integrate (pos đã dịch) và dùng CHUNG cho ccd/contact/friction;
 // - posPrev là snapshot ĐẦU step (trước integrate) — CCD lẫn posFriction đều đo từ mốc đó;
 // - posPredicted ghi ở CUỐI integrate (sau SDF/belt/occ) — finalize suy corr từ đó, đổi mốc là đổi vật lý.
 
@@ -51,6 +51,15 @@ export class SandSolver {
   /** Lưới neighbor của step VỪA chạy — renderer/diag đọc được, không phải build lại. */
   cellGrid!: GrainCellGrid;
 
+  /**
+   * CHẨN ĐOÁN (tuỳ chọn): cờ CCD per-hạt của step vừa chạy (CCD_DIAG_* trong ccd.ts). null = không đo (mặc định,
+   * 0 phí). Chỉ StaticProbe/StallTracker cấp mảng này; solver không đọc lại nó.
+   */
+  ccdDiag: Uint8Array | null = null;
+
+  /** posPredicted của step vừa chạy (mốc CUỐI integrate) — chỉ để probe suy corr = pos - predicted. CHỈ ĐỌC. */
+  get predicted(): Float32Array { return this.posPredicted; }
+
   alloc(capacity: number): void {
     this.pool.alloc(capacity);
     this.grid = new GrainNeighborGridBuffers(capacity);
@@ -86,7 +95,8 @@ export class SandSolver {
 
     if (p.ccd.ccdGate > 0) {
       grainGrainCcd(pool.positions, this.posPrev, pool.velocities, pool.radii, n,
-                    this.cellGrid, this.grid.cellStart, this.grid.entryIdx, p.ccd);
+                    this.cellGrid, this.grid.cellStart, this.grid.entryIdx, p.ccd,
+                    this.ccdDiag ?? undefined);
     }
 
     for (let k = 0; k < p.iterations; k++) {

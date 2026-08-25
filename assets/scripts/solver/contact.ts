@@ -216,7 +216,8 @@ export interface PosFrictionParams {
  * Vế đóng khe hở "solver lai": contact giải bằng VỊ TRÍ nhưng dịch chuyển không ghi vào v ⇒ creep tiếp tuyến
  * g·dt²·sinθ trượt ở tầng vị trí THUẦN — friction VẬN TỐC mù với nó, còn friction VỊ TRÍ KHÔNG ghi-ngược = dây chun.
  * Ở đây đo TRỰC TIẾP dịch chuyển tiếp tuyến tương đối cả frame (positions - posPrev, per-pair) rồi kéo lùi kiểu
- * Coulomb; phần kéo lùi được finalize cộng vào v ⇒ cả hai tầng cùng về 0 ⇒ cân bằng tĩnh thật, sleep ăn được.
+ * Coulomb; phần kéo lùi được finalize cộng vào v ⇒ cả hai tầng cùng về 0 ⇒ cân bằng tĩnh thật (bên nguồn đây là
+ * điều kiện để sleep ăn; bản này KHÔNG có sleep nhưng cân bằng tĩnh vẫn là mục tiêu).
  * 1 PASS SAU vòng contact (creep là đại lượng per-frame ~1/16 bán kính/frame — 1 pass đủ triệt).
  * pen + n̂ đo tại posPredicted (SAU gravity TRƯỚC solver = tải THẬT per-contact; đo tại positions post-solver thì
  * pen≈0).
@@ -391,8 +392,9 @@ export function finalize(positions: Float32Array, velocities: Float32Array, radi
  * Friction Coulomb per-PAIR tầng VẬN TỐC: mỗi neighbor CHỒNG LẤN tại posPredicted góp 1 impulse trượt tiếp tuyến
  * (cap Coulomb theo pen cặp đó), CỘNG DỒN rồi trừ TRUNG BÌNH 1 lần.
  *
- * ⛔ ĐỪNG trừ thẳng từng cặp vào v: lời hứa "tổng <= |vt_rel| không đảo chiều" chỉ đúng cho 1 CẶP; hạt tựa đống ngủ
- * có K~2-4 contact cùng thấy relV=vᵢ (velSnap[j]=0), tangent gần song song => tổng trừ K×½|vt| => ĐẢO CHIỀU v mỗi
+ * ⛔ ĐỪNG trừ thẳng từng cặp vào v: lời hứa "tổng <= |vt_rel| không đảo chiều" chỉ đúng cho 1 CẶP; hạt tựa đống đang
+ * nghỉ (velSnap[j]≈0 — KHÔNG phải sleep, bản này không có sleep) có K~2-4 contact cùng thấy relV=vᵢ, tangent gần
+ * song song => tổng trừ K×½|vt| => ĐẢO CHIỀU v mỗi
  * step = máy bơm năng lượng (play-test: bật hạt lên trời + fluidize đụn phẳng bất kể μᵥ). Chia cnt = Jacobi
  * under-relaxation => tổng mỗi bên <= term cặp mạnh nhất <= ½|vt_rel|.
  */
@@ -424,7 +426,7 @@ function applyPairFriction(i: number, v: V2, posPredicted: Float32Array, radii: 
       const dist = Math.sqrt(dist2);
       const nx = diffX / dist, ny = diffY / dist;
       const pen = rsum - dist;
-      const relX = vix - velSnap[j2];      // j ngủ -> velSnap[j]=0 -> trượt so với ĐẤT (ma sát tĩnh ăn)
+      const relX = vix - velSnap[j2];      // j đang nghỉ (velSnap[j]≈0) -> trượt so với ĐẤT (ma sát tĩnh ăn)
       const relY = viy - velSnap[j2 + 1];
       const rn = relX * nx + relY * ny;
       const vtx = relX - rn * nx;          // thành phần TRƯỢT tiếp tuyến của cặp

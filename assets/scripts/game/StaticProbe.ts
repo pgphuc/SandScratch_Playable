@@ -18,9 +18,15 @@
 //
 // ĐỌC LOG: giỏ nào chiếm đa số CHÍNH LÀ nguyên nhân. `occDil` cao = desync giữa texture tranh (đã xoá pixel) và
 // snapshot dilate (còn đặc) -> sửa ở refreshOccupancy/dilateCells. `float` cao = phải mở lại điều tra solver.
+//
+// PHẦN 2 (2026-08-25) — `StallTracker` ở cuối file: bắt "khựng NGẮN" theo TỪNG SIM STEP. probeStatic ở trên lấy
+// mẫu 2s/lần và chỉ nhìn hạt |v|<0.5 nên MÙ với ca user tả: hạt trong TÚI ĐANG RƠI khựng vài frame rồi rơi tiếp,
+// quanh không có SDF/tranh. Xem docblock của class để biết cách đọc dòng `[pin]`.
 
 import type { GrainParticlePool } from '../solver/pool';
 import type { IntegrateParams } from '../solver/integrate';
+import type { SandSolver } from '../solver/step';
+import { CCD_DIAG_SWEPT, CCD_DIAG_CLAMPED } from '../solver/ccd';
 import { thrOf, xformPoint, v2, type GrainSdfField, type V2 } from '../solver/sdfWalls';
 import { colOfPx, scrollPyOf, colOccBounds, revealOyMin, occAt, type ColBounds } from '../solver/occupancy';
 
@@ -224,4 +230,203 @@ export function probeStatic(pool: GrainParticlePool, ip: IntegrateParams): strin
     lines.push('[probe]   => KHONG co hat tinh bat thuong: moi hat dung im deu dang tua rig hoac mat tranh.');
   }
   return lines;
+}
+
+// ==================================================================== StallTracker — bắt "khựng" NGẮN, mỗi step
+//
+// ỨNG VIÊN đọc từ code (chưa có số đo — tracker này để đo): ccd.ts kẹp VỊ TRÍ hạt nhanh về điểm chạm (không đụng v)
+// -> finalize thấy |corr| to -> giết tới absorbCapMul·|corr|/dt = 2·0.12·30 = 7.2 world/s mỗi lần. Gate CCD lọc theo
+// vận tốc TƯƠNG ĐỐI > ccdGate·r/dt = 7.2 world/s với giả định "cột cát rơi là co-moving" — nhưng emit là CONE ±45°
+// tốc 20 (2 hạt cùng túi lệch nhau tới ~28 world/s) nên gate lọt thường xuyên NGAY TRONG TÚI. Khựng kiểu đó dài
+// 3-10 step rồi rơi tiếp, KHÔNG đứng vĩnh viễn -> tiêu chí "đứng >= 20 frame" của lần đo headless trước bỏ sót.
+//
+// Chạy MỖI SIM STEP (AdRoot.simStep, NGAY SAU solver.step, TRƯỚC harvest để index còn khớp ccdDiag/predicted).
+// 2 loại sự kiện, mỗi index:
+//   STALL — |v| tụt còn < STALL_KEEP·|v_trước| trong 1 step, khi đang chạy >= STALL_MIN_V
+//   PIN   — vị trí bất động >= PIN_STEPS step liên tiếp (KHÔNG lọc |v|), nhắc lại mỗi PIN_REPEAT_STEPS nếu còn
+// Mỗi dòng `[pin]` in kèm chứng cứ để quy tầng:
+//   ccd=E/S/C   cờ CCD của step đó (early-out / có quét / bị KẸP)
+//   corr, vn    |pos - posPredicted| finalize thấy, và thành phần v dọc corr (âm = finalize đã giết phần này)
+//   sdf(thr)    khoảng cách LOCAL tới tường SDF gần nhất (vành trong/ngoài/segment) so với dải thr
+//   occ5        số ô tranh RAW đặc trong 5x5 quanh hạt ('-' = ngoài lưới occ)
+//   nb2r, co    số hạt khác trong 2r · số hạt trùng tâm
+// ĐỌC: STALL có ccd=C + sdf>>thr + occ5=0 => đúng chuỗi CCD->finalize. STALL có ccd=E mà |vn| lớn => contact push
+// (intruderBias) thay vì CCD. PIN với nb2r=0 + occ5=0 + sdf>>thr => lơ lửng thật ngoài mọi thứ đã biết.
+// Dòng tổng `[pin] steps=..` có histogram độ dài run bất động đã KẾT THÚC — đây là số nói khựng kéo dài bao lâu.
+
+/** Bất động >= số step này = PIN. 3 step @30Hz = 0.1s. */
+const PIN_STEPS = 3;
+/** Còn bất động thì nhắc lại mỗi chừng này step (1s) — hạt kẹt vĩnh viễn không được im lặng sau dòng đầu. */
+const PIN_REPEAT_STEPS = 30;
+/** Dịch chuyển/step dưới mức này (theo bán kính) = "bất động". 0.25r ≈ 0.03 world ≈ 0.9 world/s. */
+const STILL_STEP_R = 0.25;
+/** STALL = |v| sau step < tỉ lệ này × |v| trước, khi |v| trước >= STALL_MIN_V (world/s). */
+const STALL_KEEP = 0.35;
+const STALL_MIN_V = 8;
+/** Trần dòng chi tiết — túi dày có thể bắn hàng chục sự kiện/step; đếm vẫn đủ, chi tiết chỉ cần mẫu. */
+const MAX_EVENTS_PER_STEP = 6;
+const MAX_EVENTS_PER_FLUSH = 40;
+
+export class StallTracker {
+  private readonly prevPos: Float32Array;
+  private readonly prevSpeed: Float32Array;
+  private readonly still: Uint16Array;
+  private events: string[] = [];
+  private steps = 0;
+  private stallEv = 0;
+  private pinEv = 0;
+  private dropped = 0;
+  private ccdSwept = 0;
+  private ccdClamped = 0;
+  /** Run bất động đã KẾT THÚC, theo độ dài step: 3-5 · 6-10 · 11-20 · >20. */
+  private readonly runHist = [0, 0, 0, 0];
+
+  constructor(capacity: number) {
+    this.prevPos = new Float32Array(capacity * 2);
+    this.prevSpeed = new Float32Array(capacity);
+    this.still = new Uint16Array(capacity);
+  }
+
+  /** Gọi 1 lần/sim step, ngay sau solver.step. `ip` = params integrate đang chạy (lấy sdf/occ/dt từ đó). */
+  tick(solver: SandSolver, ip: IntegrateParams, tSec: number): void {
+    const pool = solver.pool;
+    const n = pool.count;
+    const pos = pool.positions, vel = pool.velocities;
+    const diag = solver.ccdDiag;
+    const rw = pool.radii[0] > 1e-6 ? pool.radii[0] : ip.sdf.radiusLocal;
+    const stillEps = STILL_STEP_R * rw;
+    const eps2 = stillEps * stillEps;
+    const dt = ip.dt;
+    this.steps++;
+    let perStep = 0;
+
+    for (let i = 0; i < n; i++) {
+      const i2 = i * 2;
+      const x = pos[i2], y = pos[i2 + 1];
+      const dx = x - this.prevPos[i2], dy = y - this.prevPos[i2 + 1];
+      const d2 = dx * dx + dy * dy;
+      const sp = Math.sqrt(vel[i2] * vel[i2] + vel[i2 + 1] * vel[i2 + 1]);
+      const prevSp = this.prevSpeed[i];
+      if (diag !== null) {
+        const f = diag[i];
+        if (f === CCD_DIAG_CLAMPED) this.ccdClamped++; else if (f === CCD_DIAG_SWEPT) this.ccdSwept++;
+      }
+
+      let kind: 'STALL' | 'PIN' | null = null;
+      if (d2 < eps2) {
+        const s = this.still[i] + 1;
+        this.still[i] = s > 65000 ? 65000 : s;
+        if (s === PIN_STEPS || (s > PIN_STEPS && s % PIN_REPEAT_STEPS === 0)) kind = 'PIN';
+      } else {
+        const s = this.still[i];
+        if (s >= PIN_STEPS) this.runHist[s <= 5 ? 0 : (s <= 10 ? 1 : (s <= 20 ? 2 : 3))]++;
+        this.still[i] = 0;
+      }
+      // Index vừa bị swap-remove (killBelowY/harvest): prevPos/prevSpeed thuộc hạt KHÁC -> dịch chuyển to bất
+      // thường so với v trước -> không được tính STALL (PIN tự an toàn vì run bị reset về 0).
+      const lim = prevSp * dt * 1.5 + stillEps;
+      const plausible = d2 <= lim * lim;
+      if (kind === null && plausible && prevSp >= STALL_MIN_V && sp < STALL_KEEP * prevSp) kind = 'STALL';
+
+      if (kind !== null) {
+        if (kind === 'STALL') this.stallEv++; else this.pinEv++;
+        if (perStep < MAX_EVENTS_PER_STEP && this.events.length < MAX_EVENTS_PER_FLUSH) {
+          perStep++;
+          this.events.push(this.describe(kind, i, solver, ip, tSec, prevSp, sp, rw));
+        } else {
+          this.dropped++;
+        }
+      }
+      this.prevPos[i2] = x; this.prevPos[i2 + 1] = y;
+      this.prevSpeed[i] = sp;
+    }
+  }
+
+  /** Dòng tổng + các dòng sự kiện gom từ lần flush trước; reset bộ đếm. Gọi cùng nhịp với probeStatic. */
+  flush(): string[] {
+    const st = Math.max(1, this.steps);
+    const h = this.runHist;
+    const lines: string[] = [
+      `[pin] steps=${this.steps} stall=${this.stallEv} pinned=${this.pinEv} ` +
+      `ccd/step S=${(this.ccdSwept / st).toFixed(1)} C=${(this.ccdClamped / st).toFixed(1)} ` +
+      `run-bat-dong(step) 3-5:${h[0]} 6-10:${h[1]} 11-20:${h[2]} >20:${h[3]} bo-qua=${this.dropped}`,
+    ];
+    for (let k = 0; k < this.events.length; k++) lines.push(this.events[k]);
+    this.events = [];
+    this.steps = 0; this.stallEv = 0; this.pinEv = 0; this.dropped = 0;
+    this.ccdSwept = 0; this.ccdClamped = 0;
+    h[0] = 0; h[1] = 0; h[2] = 0; h[3] = 0;
+    return lines;
+  }
+
+  private describe(kind: string, i: number, solver: SandSolver, ip: IntegrateParams, tSec: number,
+                   prevSp: number, sp: number, rw: number): string {
+    const pool = solver.pool;
+    const pos = pool.positions, vel = pool.velocities;
+    const i2 = i * 2;
+    const x = pos[i2], y = pos[i2 + 1];
+
+    const diag = solver.ccdDiag;
+    const ccd = diag === null ? '-' : (diag[i] === CCD_DIAG_CLAMPED ? 'C' : (diag[i] === CCD_DIAG_SWEPT ? 'S' : 'E'));
+
+    // corr đúng phép finalize dùng (frictionPosMu=0 -> fd=0). vn âm = finalize đã giết phần v này.
+    const pr = solver.predicted;
+    const cx = x - pr[i2], cy = y - pr[i2 + 1];
+    const cl = Math.sqrt(cx * cx + cy * cy);
+    const vn = cl > 1e-9 ? (vel[i2] * cx + vel[i2 + 1] * cy) / cl : 0;
+
+    // SDF gần nhất (local): vành trong/ngoài stadium + mọi segment.
+    const sdf = ip.sdf;
+    xformPoint(sdf.worldToLocal, x, y, _lp);
+    const dSpine = distToSpine(sdf, _lp.x, _lp.y);
+    let dSdf = Math.min(Math.abs(dSpine - sdf.rOut), Math.abs(dSpine - sdf.rIn));
+    const segs = ip.segments;
+    for (let s = 0; s < sdf.segmentCount; s++) {
+      const o = s * 4;
+      const d = Math.sqrt(distSqToSeg(_lp.x, _lp.y, segs[o], segs[o + 1], segs[o + 2], segs[o + 3]));
+      if (d < dSdf) dSdf = d;
+    }
+    const thr = thrOf(sdf);
+
+    // Ô tranh RAW đặc trong 5x5 quanh hạt — cùng phép map cột/scroll/reveal như probeStatic.
+    let occ5 = '-';
+    if (ip.hasOcc !== 0) {
+      const occ = ip.occ, raw = ip.occSnapshotRaw;
+      const invCell = 1 / occ.occCellPixels;
+      const relX = x - occ.worldOriginX, relY = y - occ.worldOriginY;
+      const px = occ.invRow0X * relX + occ.invRow0Y * relY;
+      const col = colOfPx(occ, px);
+      const sPy = scrollPyOf(occ, col);
+      colOccBounds(occ, col, _bounds);
+      const oyMin = revealOyMin(occ, col);
+      const ox = Math.floor(px * invCell);
+      const oy = Math.floor((occ.invRow1X * relX + occ.invRow1Y * relY - sPy) * invCell);
+      if (ox >= 0 && ox < occ.occWidth && oy >= 0 && oy < occ.occHeight) {
+        let cnt = 0;
+        for (let j = -2; j <= 2; j++) {
+          for (let k = -2; k <= 2; k++) {
+            if (occAt(raw, occ, ox + k, oy + j, _bounds.oxMin, _bounds.oxMax, oyMin)) cnt++;
+          }
+        }
+        occ5 = `${cnt}/25`;
+      }
+    }
+
+    // Hàng xóm trong 2r + trùng tâm — brute force, chỉ chạy cho vài sự kiện/step nên rẻ.
+    const n = pool.count;
+    const r2 = (2 * rw) * (2 * rw);
+    let nb = 0, co = 0;
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue;
+      const ddx = pos[j * 2] - x, ddy = pos[j * 2 + 1] - y;
+      const dd = ddx * ddx + ddy * ddy;
+      if (dd < r2) nb++;
+      if (dd < 1e-8) co++;
+    }
+
+    return `[pin] ${kind} t=${tSec.toFixed(2)} #${i} @(${x.toFixed(2)},${y.toFixed(2)}) ` +
+           `v ${prevSp.toFixed(1)}->${sp.toFixed(1)} still=${this.still[i]} ccd=${ccd} ` +
+           `corr=${cl.toFixed(3)} vn=${vn.toFixed(1)} sdf=${dSdf.toFixed(2)}(thr ${thr.toFixed(2)}) ` +
+           `occ5=${occ5} nb2r=${nb} co=${co} ghost=${pool.ghost[i]}`;
+  }
 }
