@@ -28,7 +28,8 @@ export const SAND_TUNING = {
   grainWallCompliance: 0.20000000298023224,
 
   // --- contact ---
-  grainContactIterations: 4,
+  // ⚠ LỆCH NGUỒN CÓ CHỦ Ý (perf 2026-08-26) — nguồn Unity = 4. Xem khối "3 KNOB LỆCH NGUỒN" cuối file.
+  grainContactIterations: 3,
   grainContactStiffness: 1,
   grainContactSoftness: 0.20000000298023224,
   grainContactIntruderBias: 1,
@@ -88,7 +89,8 @@ export const SAND_TUNING = {
   grainGrainCcdGate: 2,
   grainGrainCcdMaxPull: 1,
   grainNeighborGridEnabled: true,
-  grainNeighborGridSubdiv: 1,
+  // ⚠ LỆCH NGUỒN CÓ CHỦ Ý (perf 2026-08-26) — nguồn Unity = 1. Xem khối "3 KNOB LỆCH NGUỒN" cuối file.
+  grainNeighborGridSubdiv: 3,
 
   // --- occupancy tranh ---
   grainOccupancyPushStrength: 30,
@@ -109,8 +111,9 @@ export const SAND_TUNING = {
   grainScrollClearGrainMax: 5,
 
   // --- throttle pool ---
-  grainThrottleEntry: 6000,
-  grainThrottleExit: 5900,
+  // ⚠ LỆCH NGUỒN CÓ CHỦ Ý (perf 2026-08-26) — nguồn Unity = 6000/5900. Xem khối "3 KNOB LỆCH NGUỒN" cuối file.
+  grainThrottleEntry: 5000,
+  grainThrottleExit: 4900,
   grainsPerPixelDivisor: 1.5,
 
   // --- conversion front (cào tranh -> emit hạt) ---
@@ -238,3 +241,25 @@ export function makeConversionFrontConfig(): ConversionFrontConfig {
 export function grainPoolCapacity(): number {
   return SAND_TUNING.grainThrottleEntry + 256;
 }
+
+/* ======================================================================================================
+ * 3 KNOB LỆCH NGUỒN — perf 2026-08-26 (user chốt)
+ *
+ * File này vốn là bản sao 1:1 GrainTuningConfig. Ba knob dưới đây là NGOẠI LỆ DUY NHẤT, lệch có chủ ý để hạ
+ * chi phí `contactAccumulate` — khối chiếm 68% của 1 step ở 6000 hạt (đo: tools/belt-probe/perf.js).
+ * Muốn quay về đúng nguồn Unity: đổi lại 3 số này, KHÔNG cần đụng code.
+ *
+ *   grainThrottleEntry/Exit  6000/5900 -> 5000/4900   (user chốt trần 5000)
+ *      Lãi lớn nhất: chi phí contact SIÊU TUYẾN TÍNH theo mật độ (gấp đôi hạt -> ~3.5× chi phí), vì vành belt
+ *      chỉ chứa 2400 hạt nên mọi hạt vượt trần đó đều là hạt bị NÉN, sinh thêm cặp chồng lấn.
+ *      ⚠ ĐÂY LÀ KNOB DUY NHẤT ĐỔI FEEL RÕ: ít hạt hơn -> đụn thưa hơn, lọ đầy chậm hơn. P6 parity phải đo lại.
+ *
+ *   grainNeighborGridSubdiv  1 -> 3
+ *      Ô lưới mịn hơn (cellSize = 2r/3, ring = 3) -> quét ít ứng viên rỗng hơn. TẬP contact KHÔNG đổi (ring vẫn
+ *      phủ đủ 2r), chỉ THỨ TỰ cộng đổi -> lệch mức float, không bit-identical. Build lưới không đắt thêm
+ *      (0.089 vs 0.080 ms, chạy 1 lần/step trong khi accumulate chạy `iterations` lần).
+ *
+ *   grainContactIterations   4 -> 3
+ *      Tiết kiệm tuyến tính đúng trên khối đắt nhất. Là knob CHẤT LƯỢNG: ít vòng hơn = gỡ chồng lấn yếu hơn,
+ *      đụn cát lún sâu hơn. Nếu play test thấy cát "nhão"/lún thì đây là số phải trả lại 4 TRƯỚC TIÊN.
+ * ====================================================================================================== */

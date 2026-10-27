@@ -325,10 +325,15 @@ export class AdRoot extends Component {
    * build debug=false (bản gửi network). Cờ debug là @property nên GIÁ TRỊ THẬT nằm serialize trong ad.scene —
    * đổi default trong code KHÔNG ăn, và "nhớ bỏ tick trước khi build" là quy trình người, đã hụt 1 lần.
    * Guard này bỏ hẳn khâu nhớ: bản release luôn tắt, bất kể scene tick gì. Preview vẫn tôn trọng tick.
+   *
+   * NGOẠI LỆ `window.__AD_HUD__` (2026-08-26): biến thể `test-hud.html` do packer sinh ra CÓ dán cờ này, để đo
+   * trên THIẾT BỊ THẬT (số hạt sống / belt fill / t — số quyết định solver hay texture-upload mới là điểm nóng).
+   * Cờ chỉ mở lại `debugHud`. `staticProbe`/`staticProbeSink`/`showRigStandIn` VẪN bị chốt tắt: chúng in log mỗi
+   * 2 s và vẽ thêm hình, tức tự nó làm sai phép đo. File giao cho network không có cờ ⇒ sạch y như cũ.
    */
   private applyReleaseGuard(): void {
     if (DEBUG) return;
-    this.debugHud = false;
+    this.debugHud = (globalThis as { __AD_HUD__?: unknown }).__AD_HUD__ === true;
     this.staticProbe = false;
     this.staticProbeSink = '';
     this.showRigStandIn = false;
@@ -1115,11 +1120,15 @@ export class AdRoot extends Component {
     const maxSteps = Math.max(1, SAND_TUNING.grainMaxSolverStepsPerFrame);
     this.simAccum += dt;
     let steps = 0;
+    // Bấm giờ RIÊNG vòng sim: tách "solver chậm" khỏi "phần còn lại của frame chậm" (upload texture, particle,
+    // draw). Không có phép tách này thì trên máy thật chỉ thấy fps tụt mà không biết tại ai. Chỉ đo khi HUD bật.
+    const tSim0 = this.debugHud ? performance.now() : 0;
     while (this.simAccum >= SIM_DT && steps < maxSteps) {
       this.simAccum -= SIM_DT;
       steps++;
       this.simStep();
     }
+    if (this.debugHud) this.accumFrameStats(dt, performance.now() - tSim0, steps);
     if (this.simAccum > SIM_DT * maxSteps) this.simAccum = SIM_DT * maxSteps;
 
     // Render + hình tranh + dồn cột lọ: 1 lần/FRAME.
@@ -1306,6 +1315,23 @@ export class AdRoot extends Component {
   }
 
   /** Làm mới 4 lần/giây — quét cả pool mỗi frame là phí, và mắt cũng không đọc kịp nhanh hơn. */
+  // ---- số đo frame cho HUD (chỉ chạy khi debugHud) ----
+  /** Tổng ms frame + ms vòng sim + số step, cộng dồn trong cửa sổ 0.25 s giữa 2 lần vẽ HUD. */
+  private statFrameMs = 0;
+  private statSimMs = 0;
+  private statSteps = 0;
+  private statFrames = 0;
+  /** Frame TỆ NHẤT trong cửa sổ — giật là do đỉnh, trung bình che mất nó. */
+  private statWorstMs = 0;
+
+  private accumFrameStats(dt: number, simMs: number, steps: number): void {
+    this.statFrameMs += dt * 1000;
+    this.statSimMs += simMs;
+    this.statSteps += steps;
+    this.statFrames++;
+    if (dt * 1000 > this.statWorstMs) this.statWorstMs = dt * 1000;
+  }
+
   private tickHud(dt: number): void {
     if (this.hudLabel === null) this.buildHud();
     if (this.hudLabel === null) return;
@@ -1345,7 +1371,29 @@ export class AdRoot extends Component {
 ` +
       `dang chay ${moving} (${pct(moving, n)}%)  |  |v| tb ${(n > 0 ? sumSpeed / n : 0).toFixed(2)}
 ` +
-      `jar cleared ${this.jarColumns?.clearedCount ?? 0}  |  t ${(this.runner?.secondsElapsed ?? 0).toFixed(1)}s`;
+      `jar cleared ${this.jarColumns?.clearedCount ?? 0}  |  t ${(this.runner?.secondsElapsed ?? 0).toFixed(1)}s
+` +
+      this.hudPerfLine();
+  }
+
+  /**
+   * Dòng PERF — số duy nhất trả lời được "chậm vì ai" trên máy thật:
+   *   fps / frame tb / frame ĐỈNH (giật nằm ở đây, trung bình che mất)
+   *   sim = ms vòng solver ; con = phần frame KHÔNG phải solver (upload texture 400×400×4 mỗi frame vuốt tay,
+   *         particle, draw). `con` lớn mà `sim` nhỏ ⇒ đừng tối ưu solver thêm nữa.
+   *   step/f = số sim step chạy mỗi frame (sim 30 Hz, màn 60 Hz ⇒ ~0.5 là ĐÚNG; ghim 2.0 = đang catch-up không kịp).
+   */
+  private hudPerfLine(): string {
+    const f = this.statFrames;
+    if (f === 0) return 'perf: (chua co frame)';
+    const frameMs = this.statFrameMs / f;
+    const simMs = this.statSimMs / f;
+    const line =
+      `fps ${(1000 / Math.max(0.001, frameMs)).toFixed(0)}  frame ${frameMs.toFixed(1)} ms `
+      + `(dinh ${this.statWorstMs.toFixed(1)})  |  sim ${simMs.toFixed(1)}  con ${(frameMs - simMs).toFixed(1)}`
+      + `  |  step/f ${(this.statSteps / f).toFixed(2)}`;
+    this.statFrameMs = 0; this.statSimMs = 0; this.statSteps = 0; this.statFrames = 0; this.statWorstMs = 0;
+    return line;
   }
 
   private simStep(): void {

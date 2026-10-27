@@ -1,0 +1,10 @@
+{
+  "name": "sand-scratch-tools",
+  "private": true,
+  "type": "module",
+  "description": "Dev tools cho repo playable ad (bake level, roundtrip test). KHÔNG ship vào bundle web-mobile.",
+  "dependencies": {
+    "pngjs": "^7.0.0",
+    "tsx": "^4.19.0"
+  }
+}

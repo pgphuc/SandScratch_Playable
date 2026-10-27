@@ -54,9 +54,24 @@ export interface AccumulateParams {
 }
 
 /**
+ * |v| của từng hạt, tính 1 LẦN mỗi lượt accumulate (xem ghi chú PERF ngay dưới). Cấp phát lười + chỉ NỚI RỘNG,
+ * nên sau lượt đầu vòng step vẫn KHÔNG cấp phát.
+ */
+let _speed = new Float64Array(0);
+
+/**
  * Jacobi accumulate: query các ô quanh hạt i, neighbor chồng lấn (d < ri+rj) -> cộng correction penetration-share vào
  * delta[i]. Hạt j cũng tự cộng nửa của nó ở lượt j -> đối xứng.
  * ⚠ Test chồng lấn Ở ĐÂY mỗi iter, KHÔNG cache theo cặp: tập chồng lấn đổi giữa các iter (pos dịch mỗi iter).
+ *
+ * PERF 2026-08-26 — đây là khối ĐẮT NHẤT pipeline (68% của step ở 6000 hạt; đo bằng
+ * `ads/sand-drop-jar-fill/tools/belt-probe/perf.js`). 3 sửa dưới đây THUẦN CƠ HỌC và BIT-IDENTICAL — verify bằng
+ * `perf-contact.js`: max|Δdelta| = 0.00e+0 trên 6000 hạt ở trạng thái sau 60 step thật:
+ *   (a) |v| của neighbor j trước đây tính LẠI cho TỪNG CẶP chồng lấn (`intruderBias=1` nên luôn bật) -> prepass
+ *       `_speed[]` 1 lần/hạt. Gần như TOÀN BỘ phần lãi (1.57×) nằm ở đây.
+ *   (b) `rsum`/`rsum²` hoist ra khỏi vòng cặp — `radii[i]` là hằng suốt vòng đó.
+ *   (c) `rowSpan` inline — bỏ 3 lời gọi + 3 lượt ghi object `_span` mỗi hạt mỗi iter.
+ * KHÔNG đổi `Math.hypot` -> `sqrt(x²+y²)`: đo được là KHÔNG nhanh hơn (V8 đã tối ưu) mà mất độ chính xác.
  */
 export function contactAccumulate(positions: Float32Array, velocities: Float32Array, radii: Float32Array,
                                   delta: Float32Array, count: number,
@@ -64,29 +79,48 @@ export function contactAccumulate(positions: Float32Array, velocities: Float32Ar
                                   p: AccumulateParams): void {
   const ring = grid.ring;
   const cell = grid.cellSize;
+  // (c) hình học lưới -> biến địa phương, phục vụ rowSpan inline bên dưới.
+  const gW = grid.width, gH = grid.height, gMinX = grid.minCellX, gMinY = grid.minCellY;
+  const bias = p.intruderBias;
+
+  // (a) prepass |v|. Chỉ chạy khi bias > 0 — bias=0 thì KHÔNG đụng velocities, y hệt bản cũ.
+  if (bias > 0) {
+    if (_speed.length < count) _speed = new Float64Array(count);
+    for (let i = 0; i < count; i++) _speed[i] = Math.hypot(velocities[i * 2], velocities[i * 2 + 1]);
+  }
 
   for (let i = 0; i < count; i++) {
     const i2 = i * 2;
     const pix = positions[i2], piy = positions[i2 + 1];
-    const ri = radii[i];
+    // (b) rsum hoist.
+    const rsum = radii[i] + p.uniformRadius;
+    const rsum2 = rsum * rsum;
     let dNx = 0, dNy = 0;      // tổng đẩy PHÁP TUYẾN vòng này
     let nc = 0;                // số contact — để TRUNG BÌNH (under-relaxation), KHÔNG cộng dồn
     // (INTRUDER-BIAS) hoist — bias=0 thì không đụng velocities
-    const spdI = p.intruderBias > 0 ? Math.hypot(velocities[i2], velocities[i2 + 1]) : 0;
+    const spdI = bias > 0 ? _speed[i] : 0;
 
     const cgx = Math.floor(pix / cell), cgy = Math.floor(piy / cell);
     for (let dy = -ring; dy <= ring; dy++) {
       // Các ô liền nhau của 1 hàng = 1 DẢI LIÊN TỤC -> (2·ring+1) dải thay probe ngẫu nhiên, 0 hash, 0 lọc.
-      if (!rowSpan(grid, cellStart, cgy + dy, cgx - ring, cgx + ring, _span)) continue;
-      for (let e = _span.begin; e < _span.end; e++) {
+      // (c) rowSpan INLINE — giữ NGUYÊN từng bước kẹp của nó; đổi thứ tự kẹp là đổi tập neighbor.
+      const ry = cgy + dy - gMinY;
+      if (gW <= 0 || gH <= 0 || ry < 0 || ry >= gH) continue;
+      let sa = cgx - ring - gMinX;
+      let sb = cgx + ring - gMinX;
+      if (sa < 0) sa = 0;
+      if (sb >= gW) sb = gW - 1;
+      if (sa > sb) continue;
+      const rowBase = ry * gW;
+      const spanEnd = cellStart[rowBase + sb + 1];
+      for (let e = cellStart[rowBase + sa]; e < spanEnd; e++) {
         const j = entryIdx[e];
         if (j === i) continue;
         const j2 = j * 2;
         const diffX = pix - positions[j2];
         const diffY = piy - positions[j2 + 1];
-        const rsum = ri + p.uniformRadius;
         const dist2 = diffX * diffX + diffY * diffY;
-        if (dist2 >= rsum * rsum) continue;          // không chồng -> bỏ qua
+        if (dist2 >= rsum2) continue;                // không chồng -> bỏ qua
         let dirX: number, dirY: number, pen: number;
         if (dist2 > 1e-8) {
           const dist = Math.sqrt(dist2);
@@ -107,10 +141,10 @@ export function contactAccumulate(positions: Float32Array, velocities: Float32Ar
         // ĐỤN ra đúng bằng lượng đẩy hạt lên => đụn NỞ SANG 2 BÊN, hạt chen vào giữa. TỔNG 2 bên = 1 LUÔN LUÔN
         // (lượt j tính đúng phần bù) => Jacobi vẫn đối xứng, KHÔNG bơm năng lượng — chỉ CHIA LẠI pen, không cộng xung.
         // Dòng chảy đều (belt, cột cát cùng rơi): spdI≈spdJ => 0.5 => hành vi y nguyên.
-        if (p.intruderBias > 0) {
-          const denom = spdI + Math.hypot(velocities[j2], velocities[j2 + 1]);
+        if (bias > 0) {
+          const denom = spdI + _speed[j];                    // (a) đọc prepass, không tính lại hypot mỗi cặp
           const ratio = denom > 1e-6 ? spdI / denom : 0.5;   // cả 2 gần đứng yên -> giữ 50/50
-          share = 0.5 + p.intruderBias * (ratio - 0.5);
+          share = 0.5 + bias * (ratio - 0.5);
         }
         const k = share * p.stiffness * pen;
         dNx += dirX * k;                              // penetration-share, đẩy i RA khỏi j

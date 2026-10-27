@@ -1,0 +1,30 @@
+{
+  "_doc": "Level demo cho bake tool. Mech 200x200. 2 vong tron 2 mau khop ten lo. Capacity nho = dai sach nhanh de test.",
+
+  "name": "level-demo",
+  "releaseDifficulty": "Normal",
+  "grainyLook": true,
+
+  "mech": {
+    "cornerRadiusRatio": 0.025,
+    "viewportHeight": 200,
+    "noSwipeBandHeight": 0,
+    "columnCount": 1
+  },
+
+  "view": { "scale": 2 },
+
+  "_jarNote": "4 cot lo (khop layout AdRoot: 4 cot x). Chi cot 0 va 3 co lo, cot 1 va 2 de trong.",
+  "jarColumns": [
+    [
+      { "color": "Yellow5", "capacity": 400 },
+      { "color": "Yellow5", "capacity": 400 }
+    ],
+    [],
+    [],
+    [
+      { "color": "Blue5", "capacity": 400 },
+      { "color": "Blue5", "capacity": 400 }
+    ]
+  ]
+}
