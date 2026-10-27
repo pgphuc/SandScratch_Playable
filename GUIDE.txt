@@ -1,0 +1,334 @@
+===========================================================================
+                SAND SCRATCH — PLAYABLE AD (COCOS CREATOR)
+                              GUIDE.txt
+===========================================================================
+
+Mục lục
+-----------
+  1. Dự án là gì
+  2. Yêu cầu môi trường
+  3. Cấu trúc thư mục
+  4. Mở và chạy preview lần đầu
+  5. Tạo 1 level mới (pipeline bake)
+  6. Hoán đổi level đang chạy
+  7. Build output cho mạng quảng cáo
+  8. Điểm quan trọng không được quên
+  9. Nút chỉnh tay (board-layout.txt, scenario.txt)
+ 10. Troubleshooting nhanh
+ 11. Nơi đọc thêm
+
+
+===========================================================================
+1. Dự án là gì
+===========================================================================
+
+- Playable ad (quảng cáo chơi được) của game di động Sand Scratch.
+- Engine: Cocos Creator 3.8.8 (TypeScript).
+- Output: 1 file .html độc lập (có thể nhét vào SDK mạng ad: AppLovin,
+  IronSource, Mintegral, Pangle, Meta, Unity Ads).
+- Gameplay: vuốt tay để cào tranh pixel 200x200. Hạt cát rơi xuống, lọt
+  qua băng chuyền, bị các LỌ ở bên dưới hút theo đúng màu. Clear đủ 4 lọ
+  → CTA hiện ra → chạm vào mở link store.
+
+Phần sim cát (solver PBD 30Hz) + layout rig (khung, phễu, băng chuyền) là
+port TRUNG THỰC từ bản Unity gốc. Số liệu được giữ bit-identical để parity.
+
+
+===========================================================================
+2. Yêu cầu môi trường
+===========================================================================
+
+- Cocos Creator 3.8.8 (tải tại cocos.com, chọn đúng version — khác version
+  khi import có thể migrate asset và vỡ meta).
+- Node.js >= 20 (test với v24.15). Cần cho tool bake-level.
+- Khoảng 500 MB trống (library cache của Cocos tự sinh khi import).
+
+
+===========================================================================
+3. Cấu trúc thư mục
+===========================================================================
+
+Sand_Scratch/                 (project root)
+├── assets/                   Cocos project source (TẤT CẢ asset + code)
+│   ├── scenes/
+│   │   └── ad.scene          Scene chính — tối thiểu, phần lớn dựng bằng code
+│   ├── scripts/
+│   │   ├── game/             Code gameplay (AdRoot, ColorJar, HandHint, ...)
+│   │   ├── solver/           Code sim cát (PBD solver + cellular solver)
+│   │   └── levelbake/        Codec SLB1 (encode/decode level binary)
+│   ├── resources/            Load động qua resources.load()
+│   │   ├── data/             level-NNNN.txt, scenario.txt, board-layout.txt
+│   │   ├── box/              Mesh + atlas màu hộp lọ
+│   │   ├── ui/               hand.png, cta-button.png
+│   │   ├── fx/               Texture khói, flare
+│   │   └── board/            Art nền (artboard, băng chuyền)
+│   ├── data/levels/          20 level dự phòng (chưa chuyển sang resources)
+│   ├── effects/              Shader (sand, picture, grain)
+│   └── art/                  Nguồn asset (PNG, mat, fbx)
+│
+├── settings/                 Cocos editor project config
+├── profiles/                 Cocos build profiles (preview + web-mobile)
+├── package.json              Cocos project manifest
+├── tsconfig.json             TS config cho Cocos runtime
+│
+├── tools/                    DEV TOOL — không ship vào bundle
+│   ├── bake-level.mts        Script bake level mới (xem mục 5)
+│   ├── package.json          Deps: pngjs, tsx
+│   └── level-src/            Nguồn level: PNG + JSON
+│       └── level-demo/       Ví dụ sẵn
+│           ├── picture.png
+│           └── level.json
+│
+├── GUIDE.txt                 File này
+└── .gitignore                Bỏ library/temp/build/node_modules khỏi git
+
+Thư mục KHÔNG có trong share và sẽ tự sinh khi mở Cocos:
+  library/   66 MB   cache import của editor
+  temp/      11 MB   temp của editor
+  build/              output khi bấm Build
+
+
+===========================================================================
+4. Mở và chạy preview lần đầu
+===========================================================================
+
+Bước 1. Mở Cocos Creator Dashboard → "Add Project" → chọn thư mục
+        project (Sand_Scratch) → mở. Lần đầu editor sẽ import toàn bộ asset
+        (vài phút, sinh library/).
+
+Bước 2. Trong editor, mở assets/scenes/ad.scene.
+
+Bước 3. Bấm nút Preview (▶) ở góc trên. Trình duyệt mở localhost với
+        bản ad đang chạy. Vuốt chuột để cào tranh.
+
+Nếu preview không ra: kiểm tra Console tab trong editor — thường là
+asset nào đó bị thiếu meta sau khi copy. Right-click thư mục đó →
+"Reimport Asset" là xong.
+
+
+===========================================================================
+5. Tạo 1 level mới (pipeline bake)
+===========================================================================
+
+Level được bake sẵn thành 1 file text base64 (format SLB1 — xem
+assets/scripts/levelbake/codec.ts). Nguồn là 1 PNG + 1 JSON.
+
+CÀI 1 LẦN
+---------
+    cd tools
+    npm install
+
+Sẽ cài pngjs (đọc PNG) và tsx (chạy TypeScript trực tiếp từ Node).
+
+
+THIẾT KẾ LEVEL
+--------------
+
+  1. Tạo thư mục mới:
+        tools/level-src/level-0021/
+
+  2. Vẽ file picture.png trong Photoshop / Aseprite / Figma / ...
+     - Kích thước: 200 x 200 pixel, RGBA.
+     - Pixel TRONG SUỐT (alpha = 0) = ô trống, hạt không sinh ra.
+     - Pixel OPAQUE = ô chứa hạt. Mỗi màu RGB khác nhau = 1 colorId
+       riêng (tool tự đánh số).
+     - TOP-LEFT của PNG tương ứng gốc tọa độ (0,0) của lưới cơ chế.
+
+  3. Viết level.json:
+
+        {
+          "name": "level-0021",
+          "jarColumns": [
+            [
+              { "color": "Yellow5", "capacity": 1500 },
+              { "color": "Yellow5", "capacity": 1500 }
+            ],
+            [],
+            [],
+            [
+              { "color": "Blue5", "capacity": 1500 }
+            ]
+          ]
+        }
+
+     Các field optional (nếu muốn bật):
+       "releaseDifficulty": "Normal",
+       "grainyLook": true,
+       "mech": { "cornerRadiusRatio": 0.025, "viewportHeight": 200,
+                 "noSwipeBandHeight": 0, "columnCount": 1 },
+       "view": { "scale": 2 }
+
+     jarColumns là MẢNG 4 CỘT (khớp layout fix cứng 4 cột lọ của ad).
+     Mỗi cột là mảng lọ theo thứ tự HEAD → QUEUE. 4 field mỗi lọ:
+       color       — tên trong 72 color names (xem file
+                     assets/scripts/game/ColorNames.ts).
+       capacity    — số hạt để lọ đầy.
+       hidden      — (optional) ẩn ban đầu, default false.
+       connectorId — (optional) gộp nhiều lọ cùng id, default 0.
+
+BAKE
+----
+
+    npx tsx bake-level.mts level-src/level-0021
+
+Output: ../assets/resources/data/level-0021.txt (file base64 SLB1).
+
+Thêm cờ:
+    --dry        chỉ in báo cáo, không ghi file
+    --out <path> đổi đích ghi
+
+Tool sẽ warn nếu:
+  - jar có tên không nằm trong 72 color names (lọ sẽ không hút gì)
+  - jar có màu mà picture.png không có pixel nào mang màu đó
+
+
+LƯU Ý SAU KHI BAKE
+------------------
+Mở lại Cocos editor để nó tự sinh file .meta cho file level-NNNN.txt mới.
+Nếu editor đang mở sẵn: right-click folder assets/resources/data/ →
+Refresh.
+
+
+LEVEL KHÔNG CÓ GAMEPLAY (chỉ xem tranh)
+---------------------------------------
+Nếu chỉ muốn 1 level để showcase tranh, không clear lọ:
+  - jarColumns bỏ trống hoặc để [[], [], [], []]
+  - Pixel trong tranh có thể dùng BẤT KỲ hex nào (không bắt buộc 72 names)
+  - Hạt sẽ rơi tự do, không ai hút, bị killBelowY xoá
+  - Scenario rơi về fallback 30s → CTA vẫn arm → ad vẫn chạy
+
+
+===========================================================================
+6. Hoán đổi level đang chạy
+===========================================================================
+
+Mở assets/scenes/ad.scene trong Cocos editor. Chọn node "AdRoot" (hoặc
+"AdPlayable", tùy tên). Trong Inspector tìm field:
+
+    Level Res Path = "data/level-0001"
+
+Đổi thành "data/level-0021" (hoặc "data/level-demo"). Save scene.
+Chạy Preview để test.
+
+(Có thể edit trực tiếp assets/scenes/ad.scene bằng text editor — tìm
+"levelResPath" và đổi giá trị. Nhưng chạm scene JSON tay là rủi ro, nên
+làm qua editor.)
+
+
+===========================================================================
+7. Build output cho mạng quảng cáo
+===========================================================================
+
+Trong Cocos editor:
+
+  Project → Build → chọn Platform = "Web Mobile" → Build.
+
+Output ra build/web-mobile/. Mỗi mạng ad có bản packer riêng (file HTML
+tổng + chèn script inline). Xem các commit "P5: chuan bi ban gui mang
+quang cao" và file assets/scripts/game/NetworkAdapter.ts để biết đã
+support những mạng nào (AppLovin, IronSource, Mintegral, Pangle, Meta,
+Unity Ads).
+
+Field "network" trên AdRoot quyết định CTA dùng API nào khi click:
+    "applovin" / "unityads" / "ironsource" / "mintegral" / "pangle" / "meta"
+
+
+===========================================================================
+8. Điểm quan trọng không được quên
+===========================================================================
+
+1. HAI LƯỚI PIXEL — ĐỪNG LẪN
+   - Lưới CƠ CHẾ (mech) = 200 x 200. Solver, occupancy, hạt tính trên đây.
+   - Lưới VIEW         = 400 x 400. Texture hiển thị. viewScale = 2.
+   Một ô cơ chế = khối 2x2 pixel view.
+   Trộn 2 lưới sẽ cho hình lệch đúng 2x nhưng code vẫn chạy — lỗi im lặng.
+
+2. 4 CỘT LỌ FIX CỨNG
+   Số cột lọ (4) và số slot visible (3) đến từ prefab Unity, hardcode
+   trong assets/scripts/game/AdRoot.ts (JAR_COLUMN_X, JAR_SLOT_Y).
+   KHÔNG đổi được qua level.json. Muốn đổi phải sửa code.
+
+3. 72 COLOR NAMES CHO LỌ
+   File assets/scripts/game/ColorNames.ts bake từ IR material của Unity:
+   "Yellow5" -> 0xFF9900, "Blue5" -> 0x1976D2, ... Jar BẮT BUỘC có tên
+   trong bảng này. Pixel tranh KHÔNG bắt buộc (xem mục 5).
+
+4. SIM CÁT 30Hz TÁCH KHỎI RENDER 60fps
+   Solver PBD chạy fixed-step 1/30s, render chạy mỗi frame. Vì dt đổi là
+   kết quả cát đổi — không được chạy sim theo dt frame.
+
+5. KHÔNG BỊA UUID
+   .scene và .meta của Cocos tham chiếu asset qua uuid. Mọi uuid là do
+   editor sinh, không được viết tay. Nên hầu hết cây node của ad được
+   DỰNG BẰNG CODE trong AdRoot.ts chứ không nằm trong ad.scene.
+
+6. CẤP DEBUG TRƯỚC KHI BUILD
+   Flag debugHud / staticProbe / showRigStandIn trong AdRoot cài-release
+   tự tắt (xem applyReleaseGuard, AdRoot.ts). Preview vẫn tôn trọng tick
+   trong scene. Build release = tự động sạch.
+
+
+===========================================================================
+9. Nút chỉnh tay (board-layout.txt, scenario.txt)
+===========================================================================
+
+Không cần build lại code để chỉnh:
+
+- assets/resources/data/board-layout.txt
+    JSON. Vị trí/cỡ art nền, hộp lọ, hộp hút (mouth), anim hộp.
+    Thiếu/hỏng JSON -> dùng BOARD_DEFAULT.
+
+- assets/resources/data/scenario.txt
+    JSON. Luật chạy ad: goal (clear bao nhiêu lọ), fallback timeout,
+    beats (bàn tay hint khi nào xuất hiện, biến mất), CTA (API mỗi
+    mạng ad, art, animation pulse). Hiện goal.count = 4.
+
+
+===========================================================================
+10. Troubleshooting nhanh
+===========================================================================
+
+Preview không chạy, màn hình trống:
+  - Mở Dev Tools (F12). Console có log "[boot] mode=A lo=... poolCap=...".
+  - Thiếu log boot = asset chính thiếu. Reimport asset.
+  - "boxPrefab=THIEU" = thiếu SKM_Box.fbx trong resources/box/.
+
+Vuốt không ăn trên mobile:
+  - Đã fix ở commit 61021f0: cellOfTouch trộn hệ UI với hệ màn hình.
+  - Nếu reproduce lại: so lại tọa độ touch trong AdRoot (view.getVisibleSize,
+    gameCamera.screenToWorld).
+
+Hạt kẹt trong lọ, băng chuyền đứng im:
+  - Bật mouth.debug trong board-layout.txt. Mỗi cột vẽ 1 hộp đỏ. Nếu
+    hộp đè nhau hoặc đè vào belt sai chỗ -> điều chỉnh mouth.offsetY/w/h.
+
+Clip anim hộp không chạy:
+  - Log "[boot] boxAnim: BAT loCoAnim=0/N" = clip trong fbx không tới
+    runtime. Mở Cocos editor, chọn SKM_Box.fbx, kiểm tra Animation tab.
+
+Build release vẫn thấy HUD debug:
+  - Check applyReleaseGuard — chỉ bật khi DEBUG=true. Build release có
+    DEBUG=false. Hoặc tick biến thể test-hud.html (có window.__AD_HUD__).
+
+
+===========================================================================
+11. Nơi đọc thêm
+===========================================================================
+
+Tất cả comment quan trọng nằm Ở ĐẦU từng file code. Thứ tự nên đọc:
+
+  1. assets/scripts/game/AdRoot.ts         Khối comment về sim/layout
+  2. assets/scripts/game/SandTuning.ts     Số liệu cân sim cát + rig
+  3. assets/scripts/game/PictureMap.ts     Hệ tọa độ pixel <-> world
+  4. assets/scripts/game/PictureTexture.ts Lưới mech vs view
+  5. assets/scripts/game/JarColumns.ts     Luật hút của lọ
+  6. assets/scripts/game/LevelLoad.ts      Giải nén level + palette
+  7. assets/scripts/levelbake/codec.ts     Format binary SLB1
+
+Khi debug deep: bật staticProbe + staticProbeSink trong AdRoot
+(assets/scripts/game/StaticProbe.ts) để log phân loại hạt đứng im ra
+console / file.
+
+===========================================================================
+                                 HẾT
+===========================================================================
